@@ -61,7 +61,7 @@ async def download_playlist(context, status_message, url, download_mode, quality
                 return
                 
             total_videos = len(info['entries'])
-            status_message = await status_message.reply_text(f'מצאתי {total_videos} סרטונים בפלייליסט. מתחיל להוריד... ⏳')
+            progress_message = await status_message.reply_text(f'מצאתי {total_videos} סרטונים בפלייליסט. מתחיל להוריד... ⏳')
             
             successful_downloads = 0
             for index, entry in enumerate(info['entries'], 1):
@@ -69,13 +69,20 @@ async def download_playlist(context, status_message, url, download_mode, quality
                     entry_url = entry['webpage_url']
                     await download_with_quality(context, status_message, entry_url, download_mode, quality, None, is_playlist=True)
                     successful_downloads += 1
-                    await status_message.edit_text(f'הורדתי {successful_downloads}/{total_videos} סרטונים מהפלייליסט...\n'
-                                                f'כרגע: {entry["title"]}')
+                    
+                    # מחיקת ההודעה הקודמת ושליחת הודעה חדשה
+                    await progress_message.delete()
+                    progress_message = await status_message.reply_text(
+                        f'הורדתי {successful_downloads}/{total_videos} סרטונים מהפלייליסט...\n'
+                        f'כרגע: {entry["title"]}'
+                    )
                 except Exception as e:
                     logger.error(f"Error downloading playlist entry {index}: {str(e)}")
                     continue
             
-            await status_message.edit_text(f'סיימתי! הורדתי {successful_downloads} מתוך {total_videos} סרטונים מהפלייליסט 🎉')
+            # מחיקת הודעת ההתקדמות האחרונה ושליחת סיכום
+            await progress_message.delete()
+            await status_message.reply_text(f'סיימתי! הורדתי {successful_downloads} מתוך {total_videos} סרטונים מהפלייליסט 🎉')
             
     except Exception as e:
         error_msg = str(e)
@@ -136,7 +143,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             
             if not current_file.exists():
                 if not is_playlist:
-                    await safe_edit_message(status_message, 'לא הצלחתי להוריד את הקובץ 😕')
+                    await safe_edit_message(status_message, 'לא הצלחתי להורי�� את הקובץ 😕')
                 return
                 
             size_mb = os.path.getsize(current_file) / (1024 * 1024)
