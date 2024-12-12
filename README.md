@@ -41,7 +41,7 @@ pip install -r requirements.txt
 ```
 
 4. צור קובץ `.env`:
-   - העתק את הקו��ץ `.env.example` ל-`.env`
+   - העתק את הקובץ `.env.example` ל-`.env`
    - הכנס את הטוקן של הבוט שלך (ראה הוראות בהמשך)
 
 ### 🤖 יצירת בוט טלגרם
