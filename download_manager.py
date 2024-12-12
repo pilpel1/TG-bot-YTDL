@@ -26,6 +26,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
     """הורדת קובץ באיכות ספציפית"""
     try:
         current_file = None
+        thumbnail_file = None
         format_spec = quality['format']
         
         if download_mode == 'audio':
@@ -34,7 +35,13 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         ydl_opts = {
             'format': format_spec,
             'outtmpl': str(DOWNLOADS_DIR / '%(title)s.%(ext)s'),
-            'noplaylist': True
+            'writethumbnail': True if download_mode == 'video' else False,
+            'postprocessors': [{
+                'key': 'FFmpegThumbnailsConvertor',
+                'format': 'jpg',
+            }] if download_mode == 'video' else [],
+            'noplaylist': True,
+            'socket_timeout': 120,
         }
         
         await safe_edit_message(
@@ -45,6 +52,15 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             current_file = Path(ydl.prepare_filename(info))
+            
+            # שיפוש התמונה המקדימה בכל הפורמטים האפשריים
+            if download_mode == 'video':
+                base_path = str(current_file).rsplit('.', 1)[0]
+                for ext in ['.jpg', '.webp', '.png']:
+                    thumb_path = base_path + ext
+                    if os.path.exists(thumb_path):
+                        thumbnail_file = Path(thumb_path)
+                        break
             
             if not current_file.exists():
                 await safe_edit_message(status_message, 'לא הצלחתי להוריד את הקובץ 😕')
@@ -61,16 +77,40 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                 f,
                                 title=info.get('title', 'Audio'),
                                 performer=info.get('uploader', 'Unknown'),
-                                duration=info.get('duration')
+                                duration=info.get('duration'),
+                                read_timeout=120,
+                                write_timeout=120,
+                                connect_timeout=120,
+                                pool_timeout=120
                             )
                         else:
+                            # שליחת הוידאו עם התמונה המקדימה אם קיימת
+                            thumbnail_data = None
+                            if thumbnail_file and thumbnail_file.exists():
+                                try:
+                                    with open(thumbnail_file, 'rb') as thumb:
+                                        thumbnail_data = thumb.read()
+                                except Exception as e:
+                                    logger.error(f"Error reading thumbnail: {e}")
+                            
                             await status_message.reply_video(
                                 f,
-                                caption=info.get('title', '')
+                                caption=info.get('title', ''),
+                                duration=info.get('duration'),
+                                width=info.get('width', 0),
+                                height=info.get('height', 0),
+                                thumbnail=thumbnail_data if thumbnail_data else None,
+                                supports_streaming=True,
+                                read_timeout=120,
+                                write_timeout=120,
+                                connect_timeout=120,
+                                pool_timeout=120
                             )
                             
                     if current_file and current_file.exists():
                         current_file.unlink()
+                    if thumbnail_file and thumbnail_file.exists():
+                        thumbnail_file.unlink()
                         
                     quality_msg = f" ({quality['quality_name']})" if quality['quality_name'] != 'איכות רגילה' else ""
                     await safe_send_message(status_message, f'הנה הקובץ שלך!{quality_msg} 🎉')
@@ -93,6 +133,8 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 
                 if current_file and current_file.exists():
                     current_file.unlink()
+                if thumbnail_file and thumbnail_file.exists():
+                    thumbnail_file.unlink()
                     
     except Exception as e:
         error_msg = str(e)
@@ -105,3 +147,5 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             
         if current_file and current_file.exists():
             current_file.unlink()
+        if thumbnail_file and thumbnail_file.exists():
+            thumbnail_file.unlink()
