@@ -91,21 +91,35 @@ async def download_playlist(context, status_message, url, download_mode, quality
         error_msg = str(e)
         logger.error(f"Error during playlist download: {error_msg}")
         await safe_edit_message(status_message, 'משהו השתבש בהורדת הפלייליסט 😕')
+    finally:
+        cleanup_temp_files()  # ניקוי קבצים זמניים בכל מקרה
+
+def cleanup_temp_files():
+    """ניקוי קבצים זמניים מתיקיית ההורדות"""
+    try:
+        for file in DOWNLOADS_DIR.iterdir():
+            try:
+                file.unlink()
+                logger.info(f"Cleaned up temporary file: {file}")
+            except Exception as e:
+                logger.error(f"Error deleting temporary file {file}: {e}")
+    except Exception as e:
+        logger.error(f"Error during cleanup: {e}")
 
 async def download_with_quality(context, status_message, url, download_mode, quality, quality_levels, is_playlist=False):
     """הורדת קובץ באיכות ספציפית"""
-    # בדיקה אם זה פלייליסט
-    if not is_playlist:
-        try:
-            with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
-                info = ydl.extract_info(url, download=False)
-                if 'entries' in info:
-                    await download_playlist(context, status_message, url, download_mode, quality, playlist_info=info)
-                    return
-        except Exception:
-            pass
-    
     try:
+        # בדיקה אם זה פלייליסט
+        if not is_playlist:
+            try:
+                with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    if 'entries' in info:
+                        await download_playlist(context, status_message, url, download_mode, quality, playlist_info=info)
+                        return
+            except Exception:
+                pass
+        
         current_file = None
         thumbnail_file = None
         format_spec = quality['format']
@@ -242,3 +256,5 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             current_file.unlink()
         if thumbnail_file and thumbnail_file.exists():
             thumbnail_file.unlink()
+    finally:
+        cleanup_temp_files()  # ניקוי קבצים זמניים בכל מקרה
