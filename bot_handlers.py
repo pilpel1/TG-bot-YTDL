@@ -32,21 +32,16 @@ async def ask_quality(message, download_mode):
     """שואל את המשתמש באיזו איכות הוא רוצה להוריד"""
     keyboard = []
     
-    if download_mode == 'video':
-        for i, quality in enumerate(QUALITY_LEVELS):
-            keyboard.append([
-                InlineKeyboardButton(
-                    quality['quality_name'],
-                    callback_data=f'quality_{i}'
-                )
-            ])
-    else:  # אודיו
-        keyboard = [[
-            InlineKeyboardButton("איכות רגילה 🎵", callback_data='quality_1')
-        ]]
+    for i, quality in enumerate(QUALITY_LEVELS):
+        keyboard.append([
+            InlineKeyboardButton(
+                quality['quality_name'],
+                callback_data=f'quality_{i}'
+            )
+        ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await message.edit_text('באיזו איכות להוריד?', reply_markup=reply_markup)
+    await message.edit_text('באיזו איכות להוריד את הוידאו?', reply_markup=reply_markup)
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -77,4 +72,18 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # טיפול בבחירת פורמט (אודיו/וידאו)
         download_mode = query.data  # 'audio' or 'video'
         context.user_data['download_mode'] = download_mode
-        await ask_quality(query.message, download_mode) 
+        
+        if download_mode == 'audio':
+            # עבור אודיו - מתחילים הורדה מיד באיכות הרגילה
+            status_message = await query.message.edit_text('מתחיל בהורדה... ⏳')
+            await download_with_quality(
+                context,
+                status_message,
+                context.user_data.get('current_url'),
+                download_mode,
+                QUALITY_LEVELS[1],  # איכות רגילה
+                QUALITY_LEVELS
+            )
+        else:
+            # עבור וידאו - שואלים על איכות
+            await ask_quality(query.message, download_mode) 
