@@ -12,16 +12,10 @@ if not BOT_TOKEN:
 # Paths
 DOWNLOADS_DIR = Path('downloads')
 LOGS_DIR = Path('logs')
-HISTORY_FILE = LOGS_DIR / 'download_history.txt'
 
 # Create necessary directories
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
-
-# Create history file if it doesn't exist
-if not HISTORY_FILE.exists():
-    with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-        f.write("=== היסטוריית הורדות ===\n\n")
 
 # Download settings
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB limit
