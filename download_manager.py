@@ -33,7 +33,7 @@ def get_user_identifier(chat):
         return identifier
     return str(chat.id)
 
-async def download_playlist(context, status_message, url, download_mode, quality):
+async def download_playlist(context, status_message, url, download_mode, quality, playlist_info=None):
     """הורדת פלייליסט"""
     try:
         format_spec = quality['format']
@@ -52,38 +52,41 @@ async def download_playlist(context, status_message, url, download_mode, quality
             'socket_timeout': 120,
         }
         
-        await safe_edit_message(status_message, 'מתחיל להוריד את הפלייליסט... ⏳')
+        # אם אין לנו כבר את המידע על הפלייליסט, נשיג אותו
+        if not playlist_info:
+            await safe_edit_message(status_message, 'מתחיל להוריד את הפלייליסט... ⏳')
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                playlist_info = ydl.extract_info(url, download=False)
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            if 'entries' not in info:
-                await safe_edit_message(status_message, 'לא מצאתי פלייליסט בקישור הזה 🤔')
-                return
+        if 'entries' not in playlist_info:
+            await safe_edit_message(status_message, 'לא מצאתי פלייליסט בקישור הזה 🤔')
+            return
+            
+        total_videos = len(playlist_info['entries'])
+        progress_message = await status_message.reply_text(f'מצאתי {total_videos} סרטונים בפלייליסט. מתחיל להוריד... ⏳')
+        
+        successful_downloads = 0
+        for index, entry in enumerate(playlist_info['entries'], 1):
+            try:
+                # עדכון ההודעה לפני ההורדה
+                await progress_message.delete()
+                progress_message = await status_message.reply_text(
+                    f'הורדתי {successful_downloads}/{total_videos} סרטונים מהפלייליסט\n'
+                    f'עכשיו מוריד: {entry["title"]} ⏳'
+                )
                 
-            total_videos = len(info['entries'])
-            progress_message = await status_message.reply_text(f'מצאתי {total_videos} סרטונים בפלייליסט. מתחיל להוריד... ⏳')
-            
-            successful_downloads = 0
-            for index, entry in enumerate(info['entries'], 1):
-                try:
-                    entry_url = entry['webpage_url']
-                    await download_with_quality(context, status_message, entry_url, download_mode, quality, None, is_playlist=True)
-                    successful_downloads += 1
-                    
-                    # מחיקת ההודעה הקודמת ושליחת הודעה חדשה
-                    await progress_message.delete()
-                    progress_message = await status_message.reply_text(
-                        f'הורדתי {successful_downloads}/{total_videos} סרטונים מהפלייליסט...\n'
-                        f'כרגע: {entry["title"]}'
-                    )
-                except Exception as e:
-                    logger.error(f"Error downloading playlist entry {index}: {str(e)}")
-                    continue
-            
-            # מחיקת הודעת ההתקדמות האחרונה ושליחת סיכום
-            await progress_message.delete()
-            await status_message.reply_text(f'סיימתי! הורדתי {successful_downloads} מתוך {total_videos} סרטונים מהפלייליסט 🎉')
-            
+                entry_url = entry['webpage_url']
+                await download_with_quality(context, status_message, entry_url, download_mode, quality, None, is_playlist=True)
+                successful_downloads += 1
+                
+            except Exception as e:
+                logger.error(f"Error downloading playlist entry {index}: {str(e)}")
+                continue
+        
+        # מחיקת הודעת ההתקדמות האחרונה ושליחת סיכום
+        await progress_message.delete()
+        await status_message.reply_text(f'סיימתי! הורדתי {successful_downloads} מתוך {total_videos} סרטונים מהפלייליסט 🎉')
+        
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error during playlist download: {error_msg}")
@@ -97,7 +100,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
                 info = ydl.extract_info(url, download=False)
                 if 'entries' in info:
-                    await download_playlist(context, status_message, url, download_mode, quality)
+                    await download_playlist(context, status_message, url, download_mode, quality, playlist_info=info)
                     return
         except Exception:
             pass
@@ -143,7 +146,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             
             if not current_file.exists():
                 if not is_playlist:
-                    await safe_edit_message(status_message, 'לא הצלחתי להורי�� את הקובץ 😕')
+                    await safe_edit_message(status_message, 'לא הצלחתי להוריד את הקובץ 😕')
                 return
                 
             size_mb = os.path.getsize(current_file) / (1024 * 1024)
