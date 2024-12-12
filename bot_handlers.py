@@ -28,27 +28,53 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text('מה תרצה להוריד?', reply_markup=reply_markup)
 
+async def ask_quality(message, download_mode):
+    """שואל את המשתמש באיזו איכות הוא רוצה להוריד"""
+    keyboard = []
+    
+    if download_mode == 'video':
+        for i, quality in enumerate(QUALITY_LEVELS):
+            keyboard.append([
+                InlineKeyboardButton(
+                    quality['quality_name'],
+                    callback_data=f'quality_{i}'
+                )
+            ])
+    else:  # אודיו
+        keyboard = [[
+            InlineKeyboardButton("איכות רגילה 🎵", callback_data='quality_1')
+        ]]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await message.edit_text('באיזו איכות להוריד?', reply_markup=reply_markup)
+
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    download_mode = query.data  # 'audio' or 'video'
-    url = context.user_data.get('current_url')
-    
-    logger.info(f"Starting download process for URL: {url} in mode: {download_mode}")
-    
-    if not url:
-        await query.message.reply_text('משהו השתבש, אנא שלח את הקישור שוב.')
-        return
-    
-    current_quality_index = context.user_data.get('current_quality_index', 0)
-    status_message = await query.message.reply_text('מתחיל בהורדה... ⏳')
-    
-    await download_with_quality(
-        context,
-        status_message,
-        url,
-        download_mode,
-        QUALITY_LEVELS[current_quality_index],
-        QUALITY_LEVELS
-    ) 
+    if query.data.startswith('quality_'):
+        # טיפול בבחירת איכות
+        quality_index = int(query.data.split('_')[1])
+        url = context.user_data.get('current_url')
+        download_mode = context.user_data.get('download_mode')
+        
+        if not url or not download_mode:
+            await query.message.reply_text('משהו השתבש, אנא שלח את הקישור שוב.')
+            return
+        
+        context.user_data['current_quality_index'] = quality_index
+        status_message = await query.message.edit_text('מתחיל בהורדה... ⏳')
+        
+        await download_with_quality(
+            context,
+            status_message,
+            url,
+            download_mode,
+            QUALITY_LEVELS[quality_index],
+            QUALITY_LEVELS
+        )
+    else:
+        # טיפול בבחירת פורמט (אודיו/וידאו)
+        download_mode = query.data  # 'audio' or 'video'
+        context.user_data['download_mode'] = download_mode
+        await ask_quality(query.message, download_mode) 
