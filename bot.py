@@ -1,5 +1,5 @@
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram.error import NetworkError, TimedOut
 from logger_setup import logger
 from config import BOT_TOKEN
@@ -29,15 +29,10 @@ async def error_handler(update: Update, context):
 def main():
     try:
         # Initialize the bot with custom settings
-        application = (
-            Application.builder()
-            .token(BOT_TOKEN)
-            .read_timeout(30)
-            .write_timeout(30)
-            .connect_timeout(30)
-            .pool_timeout(30)
-            .build()
-        )
+        application = (ApplicationBuilder()
+                      .token(BOT_TOKEN)
+                      .get_updates_pool_timeout(30)
+                      .build())
         
         # Add handlers
         application.add_handler(CommandHandler('start', start))
@@ -49,7 +44,7 @@ def main():
         
         # Start the bot
         logger.info("Starting bot...")
-        application.run_polling(allowed_updates=Update.ALL_TYPES, pool_timeout=30)
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
         
     except Exception as e:
         logger.error(f"Error starting bot: {str(e)}")
