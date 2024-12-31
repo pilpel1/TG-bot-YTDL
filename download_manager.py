@@ -283,7 +283,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                         status_message,
                         f'הקובץ גדול מדי ({size_mb:.1f}MB). נסה באיכות נמוכה יותר או סרטון קצר יותר.'
                     )
-                raise Exception(f"File too large: {size_mb:.1f}MB")
+                return False
     
     except Exception as e:
         error_msg = str(e)
