@@ -20,18 +20,24 @@ LOGS_DIR.mkdir(exist_ok=True)
 # Download settings
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB limit
 
-# Quality levels for video download
-QUALITY_LEVELS = [
+# Quality levels for YouTube videos
+YOUTUBE_QUALITY_LEVELS = [
     {
-        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
+        'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]',
         'quality_name': 'איכות גבוהה'
     },
     {
-        'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]',
+        'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]',
         'quality_name': 'איכות רגילה'
     },
     {
-        'format': 'bestvideo[height<=480]+bestaudio/best[height<=480]',
+        'format': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]',
         'quality_name': 'איכות נמוכה'
     }
-] 
+]
+
+# Default format for other platforms
+DEFAULT_FORMAT = {
+    'format': 'best',
+    'quality_name': 'איכות מקסימלית'
+} 
