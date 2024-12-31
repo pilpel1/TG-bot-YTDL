@@ -5,6 +5,31 @@ from pathlib import Path
 from logger_setup import logger, log_download
 from config import DOWNLOADS_DIR, MAX_FILE_SIZE
 import asyncio
+import re
+import uuid
+
+def clean_filename(filename):
+    """מנקה שם קובץ מתווים לא חוקיים ומקצר אותו אם צריך"""
+    # מחליף תווים לא חוקיים ברווח
+    filename = re.sub(r'[<>:"/\\|?*\u0000-\u001F\u007F-\u009F]', ' ', filename)
+    
+    # מסיר אימוג'ים ותווים מיוחדים
+    filename = ''.join(char for char in filename if ord(char) < 65536)
+    
+    # מנקה רווחים מיותרים
+    filename = ' '.join(filename.split())
+    
+    # מגביל את אורך שם הקובץ
+    max_length = 100  # Windows מגביל ל-260 תווים כולל הנתיב המלא
+    if len(filename) > max_length:
+        name, ext = os.path.splitext(filename)
+        filename = name[:max_length-len(ext)] + ext
+    
+    # אם השם ריק אחרי הניקוי, משתמש ב-UUID
+    if not filename.strip():
+        filename = str(uuid.uuid4())
+    
+    return filename
 
 async def safe_edit_message(message, text):
     """עדכון הודעה עם טיפול בשגיאות"""
@@ -58,6 +83,7 @@ async def download_playlist(context, status_message, url, download_mode, quality
             'no_warnings': True,
             'ignoreerrors': True,
             'socket_timeout': 30,
+            'outtmpl_na_placeholder': 'unknown_title',  # שם ברירת מחדל אם אין כותרת
         }
         
         # קבלת מידע על הפלייליסט
@@ -177,6 +203,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             }] if download_mode == 'video' else [],
             'noplaylist': True,
             'socket_timeout': 120,
+            'outtmpl_na_placeholder': 'unknown_title',  # שם ברירת מחדל אם אין כותרת
         }
         
         if not is_playlist:
@@ -192,6 +219,16 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             
             current_file = Path(ydl.prepare_filename(info))
             
+            # שיקוי שם הקובץ
+            clean_name = clean_filename(current_file.stem)
+            new_file = current_file.parent / f"{clean_name}{current_file.suffix}"
+            if current_file != new_file:
+                try:
+                    current_file.rename(new_file)
+                    current_file = new_file
+                except Exception as e:
+                    logger.error(f"Error renaming file: {e}")
+            
             # שיפוש התמונה המקדימה בכל הפורמטים האפשריים
             if download_mode == 'video':
                 base_path = str(current_file).rsplit('.', 1)[0]
@@ -199,6 +236,15 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     thumb_path = base_path + ext
                     if os.path.exists(thumb_path):
                         thumbnail_file = Path(thumb_path)
+                        # ניקוי שם קובץ התמונה הממוזערת
+                        clean_thumb_name = clean_filename(thumbnail_file.stem)
+                        new_thumb = thumbnail_file.parent / f"{clean_thumb_name}{thumbnail_file.suffix}"
+                        if thumbnail_file != new_thumb:
+                            try:
+                                thumbnail_file.rename(new_thumb)
+                                thumbnail_file = new_thumb
+                            except Exception as e:
+                                logger.error(f"Error renaming thumbnail: {e}")
                         break
             
             if not current_file.exists():
