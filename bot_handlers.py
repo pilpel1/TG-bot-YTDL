@@ -17,16 +17,12 @@ THANK_YOU_RESPONSES = [
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         'שלום! 👋\n'
-        'אני בוט להורדת סרטונים מיוטיוב.\n'
-        'פשוט שלח לי לינק ליוטיוב ואני אשאל אותך אם תרצה להוריד אודיו או וידאו.'
+        'אני בוט להורדת סרטונים ממגוון אתרים כמו יוטיוב, פייסבוק, אינסטגרם, טיקטוק ועוד.\n'
+        'פשוט שלח לי קישור ואני אשאל אותך אם תרצה להוריד אודיו או וידאו.'
     )
 
 async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text
-    if not 'youtube.com' in url and not 'youtu.be' in url:
-        await update.message.reply_text('אנא שלח קישור תקין ליוטיוב')
-        return
-        
     context.user_data['current_url'] = url
     
     keyboard = [
