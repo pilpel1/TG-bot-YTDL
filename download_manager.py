@@ -301,24 +301,46 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                         # מוצא את הפורמט הטוב ביותר של וידאו
                                         video_formats = [f for f in formats_info['formats'] 
                                                        if 'video only' in str(f.get('format_note', '')) 
-                                                       and 'm3u8' in str(f.get('protocol', ''))]
-                                        video_formats.sort(key=lambda x: int(x.get('tbr', 0)), reverse=True)
+                                                       and 'm3u8' in str(f.get('protocol', ''))
+                                                       and 'akfire_interconnect_quic' in f['format_id']]  # משתמש רק בפורמטים של akfire
+                                        video_formats.sort(key=lambda x: int(x.get('height', 0)), reverse=True)
                                         
                                         # מוצא את פורמט האודיו
                                         audio_formats = [f for f in formats_info['formats'] 
                                                        if 'audio only' in str(f.get('format_note', '')) 
-                                                       and 'm3u8' in str(f.get('protocol', ''))]
+                                                       and 'm3u8' in str(f.get('protocol', ''))
+                                                       and 'akfire_interconnect_quic' in f['format_id']]
                                         
                                         if video_formats and audio_formats:
-                                            format_spec = f"{video_formats[0]['format_id']}+{audio_formats[0]['format_id']}"
+                                            # בוחר את הפורמט הספציפי לפי האיכות המבוקשת
+                                            quality_height = int(quality.get('height', 1080))
+                                            chosen_format = None
+                                            
+                                            # מוצא את הפורמט הקרוב ביותר לאיכות המבוקשת
+                                            for fmt in video_formats:
+                                                if fmt.get('height', 0) <= quality_height:
+                                                    chosen_format = fmt
+                                                    break
+                                            
+                                            if not chosen_format and video_formats:
+                                                chosen_format = video_formats[-1]  # הפורמט הנמוך ביותר אם לא מצאנו מתאים
+                                            
+                                            format_spec = f"{chosen_format['format_id']}+{audio_formats[0]['format_id']}"
+                                            logger.info(f"Selected format: video={chosen_format['format_id']} ({chosen_format.get('height', 'N/A')}p), audio={audio_formats[0]['format_id']}")
                                         else:
-                                            format_spec = video_formats[0]['format_id'] if video_formats else 'best'
+                                            raise Exception("Could not find compatible video and audio formats")
                                     else:
                                         # עבור אודיו בלבד
                                         audio_formats = [f for f in formats_info['formats'] 
                                                        if 'audio only' in str(f.get('format_note', '')) 
-                                                       and 'm3u8' in str(f.get('protocol', ''))]
-                                        format_spec = audio_formats[0]['format_id'] if audio_formats else 'bestaudio'
+                                                       and 'm3u8' in str(f.get('protocol', ''))
+                                                       and 'akfire_interconnect_quic' in f['format_id']]
+                                        if audio_formats:
+                                            format_spec = audio_formats[0]['format_id']
+                                        else:
+                                            raise Exception("Could not find compatible audio format")
+                                else:
+                                    raise Exception("No HLS formats found")
                                 
                                 # מנסה להוריד עם הפורמט שנבחר
                                 ydl_opts['listformats'] = False
