@@ -275,12 +275,25 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 'external_downloader': 'ffmpeg',
                 'external_downloader_args': {
                     'ffmpeg_i': [
-                        '-headers', 
+                        '-headers',
                         'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                         '-reconnect', '1',
                         '-reconnect_streamed', '1',
                         '-reconnect_delay_max', '5'
                     ]
+                },
+                'http_chunk_size': 10485760,  # 10MB
+                'merge_output_format': 'mp4',
+                'concurrent_fragment_downloads': 1,
+                'fragment_retries': 10,
+                'retries': 10,
+                'file_access_retries': 10,
+                'extractor_args': {
+                    'vimeo': {
+                        'force_progressive': ['true'],
+                        'prefer_stream': ['hls'],
+                        'prefer_server': ['akfire_interconnect_quic']
+                    }
                 }
             })
 
@@ -308,15 +321,25 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                 if is_vimeo:
                                     # בחירת פורמט ספציפי עבור Vimeo
                                     if download_mode == 'video':
-                                        video_formats = [f for f in formats_info['formats'] 
-                                                       if f.get('vcodec', 'none') != 'none' 
-                                                       and f.get('acodec', 'none') != 'none']
+                                        # מחפש קודם פורמטים פרוגרסיביים
+                                        progressive_formats = [f for f in formats_info['formats'] 
+                                                            if f.get('vcodec', 'none') != 'none' 
+                                                            and f.get('acodec', 'none') != 'none'
+                                                            and not f.get('protocol', '').startswith('m3u8')]
                                         
-                                        if not video_formats:
-                                            # אם אין פורמטים משולבים, מחפש פורמטים נפרדים
+                                        if progressive_formats:
+                                            video_formats = progressive_formats
+                                        else:
+                                            # אם אין פורמטים פרוגרסיביים, מחפש HLS
                                             video_formats = [f for f in formats_info['formats'] 
-                                                           if f.get('vcodec', 'none') != 'none']
+                                                           if f.get('protocol', '') == 'm3u8_native'
+                                                           or f.get('protocol', '') == 'm3u8']
                                             
+                                            if not video_formats:
+                                                # אם אין HLS, מחפש כל פורמט וידאו
+                                                video_formats = [f for f in formats_info['formats'] 
+                                                               if f.get('vcodec', 'none') != 'none']
+                                        
                                         if video_formats:
                                             video_formats.sort(key=lambda x: int(x.get('height', 0)), reverse=True)
                                             quality_height = int(quality.get('height', 1080))
@@ -331,8 +354,9 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                                 chosen_format = video_formats[-1]
                                             
                                             format_spec = chosen_format['format_id']
+                                            
+                                            # אם זה לא פורמט פרוגרסיבי, מחפש אודיו נפרד
                                             if chosen_format.get('acodec', 'none') == 'none':
-                                                # אם אין אודיו, מחפש פורמט אודיו מתאים
                                                 audio_formats = [f for f in formats_info['formats'] 
                                                                if f.get('acodec', 'none') != 'none' 
                                                                and f.get('vcodec', 'none') == 'none']
@@ -340,10 +364,35 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                                     format_spec = f"{format_spec}+{audio_formats[0]['format_id']}"
                                             
                                             logger.info(f"Selected Vimeo format: {format_spec}")
+                                            
+                                            # עדכון הגדרות ספציפיות לפורמט שנבחר
+                                            if 'm3u8' in str(chosen_format.get('protocol', '')):
+                                                ydl_opts.update({
+                                                    'format': format_spec,
+                                                    'hls_prefer_native': False,
+                                                    'hls_use_mpegts': True,
+                                                    'external_downloader_args': {
+                                                        'ffmpeg_i': [
+                                                            '-headers',
+                                                            'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                                                            '-reconnect', '1',
+                                                            '-reconnect_streamed', '1',
+                                                            '-reconnect_delay_max', '5',
+                                                            '-analyzeduration', '100M',
+                                                            '-probesize', '100M'
+                                                        ]
+                                                    }
+                                                })
                                     else:
                                         # עבור אודיו בלבד
                                         audio_formats = [f for f in formats_info['formats'] 
-                                                       if f.get('acodec', 'none') != 'none']
+                                                       if f.get('acodec', 'none') != 'none'
+                                                       and not f.get('protocol', '').startswith('m3u8')]
+                                        
+                                        if not audio_formats:
+                                            audio_formats = [f for f in formats_info['formats'] 
+                                                           if f.get('acodec', 'none') != 'none']
+                                        
                                         if audio_formats:
                                             format_spec = audio_formats[0]['format_id']
                                             logger.info(f"Selected Vimeo audio format: {format_spec}")
