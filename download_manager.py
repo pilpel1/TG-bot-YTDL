@@ -244,14 +244,22 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             }] if download_mode == 'video' else [],
             'noplaylist': True,
             'socket_timeout': 120,
-            'outtmpl': '%(id)s.%(ext)s',  # משתמש במזהה כברירת מחדל
+            'outtmpl': '%(id)s.%(ext)s',
             'outtmpl_na_placeholder': 'unknown_title',
             'progress_hooks': [],
             'outtmpl_func': custom_filename,
             'paths': {'home': str(DOWNLOADS_DIR)},
             'writesubtitles': False,
             'writethumbnail': True if download_mode == 'video' else False,
-            'outtmpl_thumbnail': '%(id)s.%(ext)s'  # משתמש במזהה גם לתמונות ממוזערות
+            'outtmpl_thumbnail': '%(id)s.%(ext)s',
+            # אופציות גנריות משופרות
+            'extractor_retries': 3,
+            'retries': 5,
+            'fragment_retries': 5,
+            'abort_on_unavailable_fragment': True,  # ביטול ההורדה אם חלק מהסרטון לא זמין
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
         }
         
         if not is_playlist:
