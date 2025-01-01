@@ -195,12 +195,45 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             
         # פונקציה שמנקה את שם הקובץ לפני היצירה
         def custom_filename(info_dict, *, prefix=''):
-            video_title = info_dict.get('title', 'video')
-            clean_title = clean_filename(video_title)
-            if prefix:
-                clean_title = f"{prefix}_{clean_title}"
-            ext = info_dict.get('ext', 'mp4')
-            return str(DOWNLOADS_DIR / f"{clean_title}.{ext}")
+            try:
+                # מנסה קודם עם הכותרת
+                video_title = info_dict.get('title', 'video')
+                clean_title = clean_filename(video_title)
+                filename = clean_title
+                
+                # אם השם ריק או קצר מדי, משתמש במזהה
+                if len(filename.strip()) < 3:
+                    video_id = info_dict.get('id', str(uuid.uuid4()))
+                    filename = f"{video_id}"
+                
+                if prefix:
+                    filename = f"{prefix}_{filename}"
+                    
+                ext = info_dict.get('ext', 'mp4')
+                full_path = str(DOWNLOADS_DIR / f"{filename}.{ext}")
+                
+                # בודק אם השם תקין
+                try:
+                    Path(full_path).touch()
+                    Path(full_path).unlink()
+                    return full_path
+                except OSError:
+                    # אם נכשל, משתמש במזהה
+                    video_id = info_dict.get('id', str(uuid.uuid4()))
+                    filename = f"{video_id}"
+                    if prefix:
+                        filename = f"{prefix}_{filename}"
+                    return str(DOWNLOADS_DIR / f"{filename}.{ext}")
+                    
+            except Exception as e:
+                # במקרה של כל שגיאה, משתמש במזהה
+                logger.error(f"Error in custom_filename: {e}")
+                video_id = info_dict.get('id', str(uuid.uuid4()))
+                filename = f"{video_id}"
+                if prefix:
+                    filename = f"{prefix}_{filename}"
+                ext = info_dict.get('ext', 'mp4')
+                return str(DOWNLOADS_DIR / f"{filename}.{ext}")
             
         ydl_opts = {
             'format': format_spec,
