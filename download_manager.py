@@ -249,17 +249,25 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             'writesubtitles': False,
             'writethumbnail': True if download_mode == 'video' else False,
             'outtmpl_thumbnail': '%(id)s.%(ext)s',
-            'extractor_retries': 3,
-            'retries': 5,
-            'fragment_retries': 5,
+            'extractor_retries': 10,
+            'retries': 10,
+            'fragment_retries': 10,
             'skip_download': False,
             'quiet': True,
             'no_warnings': True,
+            'extract_flat': False,
+            'youtube_include_dash_manifest': False,
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': '*/*',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
                 'Accept-Language': 'en-US,en;q=0.9',
                 'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
                 'Origin': 'https://vimeo.com',
                 'Referer': 'https://vimeo.com/'
             }
@@ -275,19 +283,22 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 'external_downloader': 'ffmpeg',
                 'external_downloader_args': {
                     'ffmpeg_i': [
-                        '-headers',
-                        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                        '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        '-headers', 'Accept: */*',
+                        '-headers', 'Origin: https://vimeo.com',
+                        '-headers', 'Referer: https://vimeo.com/',
                         '-reconnect', '1',
                         '-reconnect_streamed', '1',
-                        '-reconnect_delay_max', '5'
+                        '-reconnect_delay_max', '5',
+                        '-multiple_requests', '1'
                     ]
                 },
-                'http_chunk_size': 10485760,  # 10MB
+                'http_chunk_size': 10485760,
                 'merge_output_format': 'mp4',
                 'concurrent_fragment_downloads': 1,
-                'fragment_retries': 10,
-                'retries': 10,
-                'file_access_retries': 10,
+                'downloader_options': {
+                    'http_chunk_size': 10485760,
+                },
                 'extractor_args': {
                     'vimeo': {
                         'force_progressive': ['true'],
@@ -295,6 +306,14 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                         'prefer_server': ['akfire_interconnect_quic']
                     }
                 }
+            })
+
+            # הוספת מידע נוסף לבקשה
+            ydl_opts['http_headers'].update({
+                'DNT': '1',
+                'TE': 'trailers',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
             })
 
         if not is_playlist:
@@ -305,10 +324,24 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
+                # ניסיון ראשון - הורדה ישירה
                 info = ydl.extract_info(url, download=True)
             except yt_dlp.utils.DownloadError as e:
                 if "Requested format is not available" in str(e):
                     logger.info("Requested format not available, checking available formats...")
+                    
+                    # קודם מנסה לקבל מידע על הוידאו
+                    try:
+                        ydl_opts_info = ydl_opts.copy()
+                        ydl_opts_info['extract_flat'] = True
+                        ydl_opts_info['skip_download'] = True
+                        with yt_dlp.YoutubeDL(ydl_opts_info) as ydl_info:
+                            video_info = ydl_info.extract_info(url, download=False)
+                            logger.info(f"Video info extracted successfully: {video_info.get('title', 'Unknown')}")
+                    except Exception as info_error:
+                        logger.error(f"Error extracting video info: {str(info_error)}")
+                    
+                    # עכשיו מנסה לקבל את הפורמטים
                     ydl_opts['listformats'] = True
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl_list:
                         try:
@@ -329,16 +362,20 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                         
                                         if progressive_formats:
                                             video_formats = progressive_formats
+                                            logger.info("Found progressive formats")
                                         else:
                                             # אם אין פורמטים פרוגרסיביים, מחפש HLS
                                             video_formats = [f for f in formats_info['formats'] 
-                                                           if f.get('protocol', '') == 'm3u8_native'
-                                                           or f.get('protocol', '') == 'm3u8']
+                                                           if (f.get('protocol', '') == 'm3u8_native'
+                                                           or f.get('protocol', '') == 'm3u8')
+                                                           and f.get('vcodec', 'none') != 'none']
+                                            logger.info("Using HLS formats")
                                             
                                             if not video_formats:
                                                 # אם אין HLS, מחפש כל פורמט וידאו
                                                 video_formats = [f for f in formats_info['formats'] 
                                                                if f.get('vcodec', 'none') != 'none']
+                                                logger.info("Using any video formats")
                                         
                                         if video_formats:
                                             video_formats.sort(key=lambda x: int(x.get('height', 0)), reverse=True)
@@ -354,6 +391,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                                 chosen_format = video_formats[-1]
                                             
                                             format_spec = chosen_format['format_id']
+                                            logger.info(f"Selected format details: {chosen_format}")
                                             
                                             # אם זה לא פורמט פרוגרסיבי, מחפש אודיו נפרד
                                             if chosen_format.get('acodec', 'none') == 'none':
@@ -373,11 +411,14 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                                     'hls_use_mpegts': True,
                                                     'external_downloader_args': {
                                                         'ffmpeg_i': [
-                                                            '-headers',
-                                                            'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                                                            '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                                                            '-headers', 'Accept: */*',
+                                                            '-headers', 'Origin: https://vimeo.com',
+                                                            '-headers', 'Referer: https://vimeo.com/',
                                                             '-reconnect', '1',
                                                             '-reconnect_streamed', '1',
                                                             '-reconnect_delay_max', '5',
+                                                            '-multiple_requests', '1',
                                                             '-analyzeduration', '100M',
                                                             '-probesize', '100M'
                                                         ]
