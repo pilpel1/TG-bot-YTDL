@@ -187,8 +187,8 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                         return
             except Exception as e:
                 logger.error(f"Error checking if URL is playlist: {str(e)}")
-                # ממשיך כאילו זה לא פלייליסט
         
+        # הגדרות בסיסיות עבור yt-dlp
         format_spec = quality['format']
         if download_mode == 'audio':
             format_spec = 'bestaudio[ext=m4a]/best[ext=m4a]/bestaudio'
@@ -196,12 +196,10 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         # פונקציה שמנקה את שם הקובץ לפני היצירה
         def custom_filename(info_dict, *, prefix=''):
             try:
-                # מנסה קודם עם הכותרת
                 video_title = info_dict.get('title', 'video')
                 clean_title = clean_filename(video_title)
                 filename = clean_title
                 
-                # אם השם ריק או קצר מדי, משתמש במזהה
                 if len(filename.strip()) < 3:
                     video_id = info_dict.get('id', str(uuid.uuid4()))
                     filename = f"{video_id}"
@@ -212,13 +210,11 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 ext = info_dict.get('ext', 'mp4')
                 full_path = str(DOWNLOADS_DIR / f"{filename}.{ext}")
                 
-                # בודק אם השם תקין
                 try:
                     Path(full_path).touch()
                     Path(full_path).unlink()
                     return full_path
                 except OSError:
-                    # אם נכשל, משתמש במזהה
                     video_id = info_dict.get('id', str(uuid.uuid4()))
                     filename = f"{video_id}"
                     if prefix:
@@ -226,7 +222,6 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     return str(DOWNLOADS_DIR / f"{filename}.{ext}")
                     
             except Exception as e:
-                # במקרה של כל שגיאה, משתמש במזהה
                 logger.error(f"Error in custom_filename: {e}")
                 video_id = info_dict.get('id', str(uuid.uuid4()))
                 filename = f"{video_id}"
@@ -234,7 +229,9 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     filename = f"{prefix}_{filename}"
                 ext = info_dict.get('ext', 'mp4')
                 return str(DOWNLOADS_DIR / f"{filename}.{ext}")
-            
+
+        # הגדרות מותאמות עבור Vimeo
+        is_vimeo = 'vimeo.com' in url
         ydl_opts = {
             'format': format_spec,
             'writethumbnail': True if download_mode == 'video' else False,
@@ -252,26 +249,41 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             'writesubtitles': False,
             'writethumbnail': True if download_mode == 'video' else False,
             'outtmpl_thumbnail': '%(id)s.%(ext)s',
-            # אופציות גנריות משופרות
             'extractor_retries': 3,
             'retries': 5,
             'fragment_retries': 5,
-            'abort_on_unavailable_fragment': True,
-            'hls_prefer_native': False,
-            'external_downloader': 'ffmpeg',
-            'external_downloader_args': {'ffmpeg_i': ['-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36']},
+            'skip_download': False,
+            'quiet': True,
+            'no_warnings': True,
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': '*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Origin': 'https://vimeo.com',
                 'Referer': 'https://vimeo.com/'
             }
         }
-        
-        # אם זה וימאו, נוסיף הגדרות ספציפיות
-        if 'vimeo.com' in url:
+
+        # הגדרות נוספות עבור Vimeo
+        if is_vimeo:
             ydl_opts.update({
-                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best' if download_mode == 'video' else 'bestaudio[ext=m4a]/bestaudio'
+                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best' if download_mode == 'video' else 'bestaudio[ext=m4a]/bestaudio',
+                'allow_unplayable_formats': True,
+                'hls_prefer_native': False,
+                'hls_split_discontinuity': True,
+                'external_downloader': 'ffmpeg',
+                'external_downloader_args': {
+                    'ffmpeg_i': [
+                        '-headers', 
+                        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                        '-reconnect', '1',
+                        '-reconnect_streamed', '1',
+                        '-reconnect_delay_max', '5'
+                    ]
+                }
             })
-        
+
         if not is_playlist:
             await safe_edit_message(
                 status_message,
@@ -284,9 +296,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             except yt_dlp.utils.DownloadError as e:
                 if "Requested format is not available" in str(e):
                     logger.info("Requested format not available, checking available formats...")
-                    # בודק אילו פורמטים זמינים
                     ydl_opts['listformats'] = True
-                    ydl_opts['quiet'] = True
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl_list:
                         try:
                             formats_info = ydl_list.extract_info(url, download=False)
@@ -295,20 +305,22 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                                    for f in formats_info['formats']]
                                 logger.info(f"Available formats: {available_formats}")
                                 
-                                # מוחר פורמט ספציפי עבור HLS
-                                if any('m3u8' in str(f.get('protocol', '')) for f in formats_info['formats']):
+                                if is_vimeo:
+                                    # בחירת פורמט ספציפי עבור Vimeo
                                     if download_mode == 'video':
-                                        # מוצא את כל פורמטי הוידאו
                                         video_formats = [f for f in formats_info['formats'] 
-                                                       if 'video only' in str(f.get('format_note', '')) 
-                                                       and 'm3u8' in str(f.get('protocol', ''))]
+                                                       if f.get('vcodec', 'none') != 'none' 
+                                                       and f.get('acodec', 'none') != 'none']
                                         
+                                        if not video_formats:
+                                            # אם אין פורמטים משולבים, מחפש פורמטים נפרדים
+                                            video_formats = [f for f in formats_info['formats'] 
+                                                           if f.get('vcodec', 'none') != 'none']
+                                            
                                         if video_formats:
-                                            # ממיין לפי איכות
                                             video_formats.sort(key=lambda x: int(x.get('height', 0)), reverse=True)
                                             quality_height = int(quality.get('height', 1080))
                                             
-                                            # בוחר את הפורמט המתאים
                                             chosen_format = None
                                             for fmt in video_formats:
                                                 if fmt.get('height', 0) <= quality_height:
@@ -316,26 +328,64 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                                     break
                                             
                                             if not chosen_format:
-                                                chosen_format = video_formats[-1]  # הפורמט הנמוך ביותר אם לא מצאנו מתאים
+                                                chosen_format = video_formats[-1]
                                             
-                                            # משתמש בפורמט הספציפי
                                             format_spec = chosen_format['format_id']
-                                            logger.info(f"Selected format: {format_spec} ({chosen_format.get('height', 'N/A')}p)")
-                                        else:
-                                            raise Exception("Could not find compatible video format")
+                                            if chosen_format.get('acodec', 'none') == 'none':
+                                                # אם אין אודיו, מחפש פורמט אודיו מתאים
+                                                audio_formats = [f for f in formats_info['formats'] 
+                                                               if f.get('acodec', 'none') != 'none' 
+                                                               and f.get('vcodec', 'none') == 'none']
+                                                if audio_formats:
+                                                    format_spec = f"{format_spec}+{audio_formats[0]['format_id']}"
+                                            
+                                            logger.info(f"Selected Vimeo format: {format_spec}")
                                     else:
-                                        # עבור אודיו בלבד - משתמש בפורמט הראשון שזמין
+                                        # עבור אודיו בלבד
                                         audio_formats = [f for f in formats_info['formats'] 
-                                                       if 'audio only' in str(f.get('format_note', ''))]
+                                                       if f.get('acodec', 'none') != 'none']
                                         if audio_formats:
                                             format_spec = audio_formats[0]['format_id']
-                                            logger.info(f"Selected audio format: {format_spec}")
+                                            logger.info(f"Selected Vimeo audio format: {format_spec}")
                                         else:
                                             raise Exception("Could not find compatible audio format")
                                 else:
-                                    raise Exception("No HLS formats found")
+                                    # טיפול בפורמטים אחרים (לא Vimeo)
+                                    if any('m3u8' in str(f.get('protocol', '')) for f in formats_info['formats']):
+                                        if download_mode == 'video':
+                                            video_formats = [f for f in formats_info['formats'] 
+                                                           if 'video only' in str(f.get('format_note', '')) 
+                                                           and 'm3u8' in str(f.get('protocol', ''))]
+                                            
+                                            if video_formats:
+                                                video_formats.sort(key=lambda x: int(x.get('height', 0)), reverse=True)
+                                                quality_height = int(quality.get('height', 1080))
+                                                
+                                                chosen_format = None
+                                                for fmt in video_formats:
+                                                    if fmt.get('height', 0) <= quality_height:
+                                                        chosen_format = fmt
+                                                        break
+                                                
+                                                if not chosen_format:
+                                                    chosen_format = video_formats[-1]
+                                                
+                                                format_spec = chosen_format['format_id']
+                                                logger.info(f"Selected format: {format_spec} ({chosen_format.get('height', 'N/A')}p)")
+                                            else:
+                                                raise Exception("Could not find compatible video format")
+                                        else:
+                                            audio_formats = [f for f in formats_info['formats'] 
+                                                           if 'audio only' in str(f.get('format_note', ''))]
+                                            if audio_formats:
+                                                format_spec = audio_formats[0]['format_id']
+                                                logger.info(f"Selected audio format: {format_spec}")
+                                            else:
+                                                raise Exception("Could not find compatible audio format")
+                                    else:
+                                        raise Exception("No compatible formats found")
                                 
-                                # מנסה להוריד עם הפורמט שנבחר
+                                # ניסיון הורדה עם הפורמט שנבחר
                                 ydl_opts['listformats'] = False
                                 ydl_opts['format'] = format_spec
                                 logger.info(f"Trying to download with format: {format_spec}")
