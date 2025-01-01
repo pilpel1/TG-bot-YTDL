@@ -257,8 +257,8 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             'retries': 5,
             'fragment_retries': 5,
             'abort_on_unavailable_fragment': True,
-            'hls_prefer_native': False,  # משתמש ב-ffmpeg במקום native HLS downloader
-            'external_downloader': 'ffmpeg',  # משתמש ב-ffmpeg להורדה
+            'hls_prefer_native': False,
+            'external_downloader': 'ffmpeg',
             'external_downloader_args': {'ffmpeg_i': ['-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36']},
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -301,40 +301,42 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                         # מוצא את הפורמט הטוב ביותר של וידאו
                                         video_formats = [f for f in formats_info['formats'] 
                                                        if 'video only' in str(f.get('format_note', '')) 
-                                                       and 'm3u8' in str(f.get('protocol', ''))
-                                                       and 'akfire_interconnect_quic' in f['format_id']]  # משתמש רק בפורמטים של akfire
-                                        video_formats.sort(key=lambda x: int(x.get('height', 0)), reverse=True)
+                                                       and 'm3u8' in str(f.get('protocol', ''))]
                                         
                                         # מוצא את פורמט האודיו
                                         audio_formats = [f for f in formats_info['formats'] 
-                                                       if 'audio only' in str(f.get('format_note', '')) 
-                                                       and 'm3u8' in str(f.get('protocol', ''))
-                                                       and 'akfire_interconnect_quic' in f['format_id']]
+                                                       if 'audio only' in str(f.get('format_note', ''))]
                                         
                                         if video_formats and audio_formats:
                                             # בוחר את הפורמט הספציפי לפי האיכות המבוקשת
                                             quality_height = int(quality.get('height', 1080))
-                                            chosen_format = None
+                                            video_formats.sort(key=lambda x: int(x.get('height', 0)), reverse=True)
                                             
                                             # מוצא את הפורמט הקרוב ביותר לאיכות המבוקשת
+                                            chosen_format = None
                                             for fmt in video_formats:
                                                 if fmt.get('height', 0) <= quality_height:
                                                     chosen_format = fmt
                                                     break
                                             
                                             if not chosen_format and video_formats:
-                                                chosen_format = video_formats[-1]  # הפורמט הנמוך ביותר אם לא מצאנו מתאים
+                                                chosen_format = video_formats[-1]
                                             
-                                            format_spec = f"{chosen_format['format_id']}+{audio_formats[0]['format_id']}"
-                                            logger.info(f"Selected format: video={chosen_format['format_id']} ({chosen_format.get('height', 'N/A')}p), audio={audio_formats[0]['format_id']}")
+                                            # בוחר את הפורמט הטוב ביותר מבין akfire או fastly
+                                            audio_format = audio_formats[0]
+                                            if 'akfire_interconnect_quic' in chosen_format['format_id']:
+                                                audio_format = next((f for f in audio_formats if 'akfire_interconnect_quic' in f['format_id']), audio_formats[0])
+                                            elif 'fastly_skyfire' in chosen_format['format_id']:
+                                                audio_format = next((f for f in audio_formats if 'fastly_skyfire' in f['format_id']), audio_formats[0])
+                                            
+                                            format_spec = f"{chosen_format['format_id']}+{audio_format['format_id']}"
+                                            logger.info(f"Selected format: video={chosen_format['format_id']} ({chosen_format.get('height', 'N/A')}p), audio={audio_format['format_id']}")
                                         else:
                                             raise Exception("Could not find compatible video and audio formats")
                                     else:
                                         # עבור אודיו בלבד
                                         audio_formats = [f for f in formats_info['formats'] 
-                                                       if 'audio only' in str(f.get('format_note', '')) 
-                                                       and 'm3u8' in str(f.get('protocol', ''))
-                                                       and 'akfire_interconnect_quic' in f['format_id']]
+                                                       if 'audio only' in str(f.get('format_note', ''))]
                                         if audio_formats:
                                             format_spec = audio_formats[0]['format_id']
                                         else:
