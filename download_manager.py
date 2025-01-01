@@ -194,15 +194,16 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             format_spec = 'bestaudio[ext=m4a]/best[ext=m4a]/bestaudio'
             
         # פונקציה שמנקה את שם הקובץ לפני היצירה
-        def custom_filename(info_dict):
+        def custom_filename(info_dict, *, prefix=''):
             video_title = info_dict.get('title', 'video')
             clean_title = clean_filename(video_title)
+            if prefix:
+                clean_title = f"{prefix}_{clean_title}"
             ext = info_dict.get('ext', 'mp4')
-            return f"{clean_title}.{ext}"
+            return str(DOWNLOADS_DIR / f"{clean_title}.{ext}")
             
         ydl_opts = {
             'format': format_spec,
-            'outtmpl': str(DOWNLOADS_DIR / '%(title)s.%(ext)s'),
             'writethumbnail': True if download_mode == 'video' else False,
             'postprocessors': [{
                 'key': 'FFmpegThumbnailsConvertor',
@@ -210,10 +211,14 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             }] if download_mode == 'video' else [],
             'noplaylist': True,
             'socket_timeout': 120,
-            'outtmpl_na_placeholder': 'unknown_title',  # שם ברירת מחדל אם אין כותרת
-            'outtmpl': str(DOWNLOADS_DIR / '%(title)s.%(ext)s'),
+            'outtmpl': '%(title)s.%(ext)s',  # תבנית בסיסית, תשומש על ידי custom_filename
+            'outtmpl_na_placeholder': 'unknown_title',
             'progress_hooks': [],
-            'outtmpl_func': custom_filename,  # שימוש בפונקציה המותאמת אישית
+            'outtmpl_func': custom_filename,
+            'paths': {'home': str(DOWNLOADS_DIR)},
+            'writesubtitles': False,
+            'writethumbnail': True if download_mode == 'video' else False,
+            'outtmpl_thumbnail': lambda info_dict: custom_filename(info_dict, prefix='thumb')
         }
         
         if not is_playlist:
