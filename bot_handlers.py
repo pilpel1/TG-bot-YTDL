@@ -4,6 +4,7 @@ from logger_setup import logger
 from config import YOUTUBE_QUALITY_LEVELS, DEFAULT_FORMAT
 from download_manager import download_with_quality
 import random
+import re
 
 THANK_YOU_RESPONSES = [
     "בכיף! 😊",
@@ -14,6 +15,43 @@ THANK_YOU_RESPONSES = [
     "בשמחה! ✨"
 ]
 
+def is_valid_url(url: str) -> bool:
+    """בודק האם המחרוזת היא URL תקין"""
+    url_pattern = re.compile(
+        r'https?://'  # http:// או https://
+        r'(?:(?:[\w-]+\.)+[\w-]+)'  # דומיין
+        r'(?:/[^\s]*)?'  # נתיב אופציונלי
+    )
+    return bool(url_pattern.match(url))
+
+def is_preferred_platform(url: str) -> bool:
+    """בודק האם ה-URL הוא מאחת הפלטפורמות המועדפות"""
+    preferred_platforms = re.compile(
+        r'https?://(?:www\.)?'
+        r'(?:youtube\.com/|youtu\.be/|'
+        r'facebook\.com/|fb\.watch/|'
+        r'instagram\.com/|'
+        r'twitter\.com/|x\.com/|'
+        r'tiktok\.com/)'
+        r'[^\s]+'
+    )
+    return bool(preferred_platforms.match(url))
+
+def is_thank_you_message(text: str) -> bool:
+    """בודק האם ההודעה היא הודעת תודה"""
+    thank_you_patterns = [
+        'תודה',
+        'תודה רבה',
+        'תודה לך',
+        'תודה על',
+        'תודה.*',
+        'תנקס',
+        'thanks',
+        'thank you',
+        'thx'
+    ]
+    return any(re.search(pattern, text.lower()) for pattern in thank_you_patterns)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         'שלום! 👋\n'
@@ -23,11 +61,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = update.message.text
-    context.user_data['current_url'] = url
+    text = update.message.text
+    
+    # בדיקה האם זו הודעת תודה
+    if is_thank_you_message(text):
+        await handle_thank_you(update, context)
+        return
+    
+    # אם זו לא הודעת תודה, בודקים אם זה URL
+    if not is_valid_url(text):
+        await update.message.reply_text(
+            "אנא שלח קישור תקין (URL) מאחד מהאתרים הבאים:\n"
+            "• יוטיוב\n"
+            "• פייסבוק\n"
+            "• אינסטגרם\n"
+            "• טוויטר/X\n"
+            "• טיקטוק\n\n"
+            "ניתן לנסות גם קישורים מאתרי מדיה פופולריים אחרים 😊"
+        )
+        return
+    
+    context.user_data['current_url'] = text
     
     # בדיקה האם זה קישור יוטיוב
-    is_youtube = 'youtube.com' in url or 'youtu.be' in url
+    is_youtube = 'youtube.com' in text or 'youtu.be' in text
     context.user_data['is_youtube'] = is_youtube
     
     keyboard = [
