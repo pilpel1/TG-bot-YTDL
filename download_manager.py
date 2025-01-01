@@ -256,11 +256,21 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             'extractor_retries': 3,
             'retries': 5,
             'fragment_retries': 5,
-            'abort_on_unavailable_fragment': True,  # ביטול ההורדה אם חלק מהסרטון לא זמין
+            'abort_on_unavailable_fragment': True,
+            'hls_prefer_native': False,  # משתמש ב-ffmpeg במקום native HLS downloader
+            'external_downloader': 'ffmpeg',  # משתמש ב-ffmpeg להורדה
+            'external_downloader_args': {'ffmpeg_i': ['-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36']},
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Referer': 'https://vimeo.com/'
             }
         }
+        
+        # אם זה וימאו, נוסיף הגדרות ספציפיות
+        if 'vimeo.com' in url:
+            ydl_opts.update({
+                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best' if download_mode == 'video' else 'bestaudio[ext=m4a]/bestaudio'
+            })
         
         if not is_playlist:
             await safe_edit_message(
@@ -285,35 +295,30 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                                    for f in formats_info['formats']]
                                 logger.info(f"Available formats: {available_formats}")
                                 
-                                # מוחר את הפורמט המתאים ביותר
-                                if download_mode == 'video':
-                                    # מחפש את הפורמט הטוב ביותר של וידאו + אודיו
-                                    video_format = None
-                                    audio_format = None
-                                    
-                                    # מוצא את פורמט הוידאו הטוב ביותר
-                                    for f in formats_info['formats']:
-                                        if 'video only' in str(f.get('format_note', '')):
-                                            if not video_format or int(f.get('tbr', 0)) > int(video_format.get('tbr', 0)):
-                                                video_format = f
-                                    
-                                    # מוצא את פורמט האודיו
-                                    for f in formats_info['formats']:
-                                        if 'audio only' in str(f.get('format_note', '')):
-                                            audio_format = f
-                                            break
-                                    
-                                    if video_format and audio_format:
-                                        format_spec = f"{video_format['format_id']}+{audio_format['format_id']}"
+                                # מוחר פורמט ספציפי עבור HLS
+                                if any('m3u8' in str(f.get('protocol', '')) for f in formats_info['formats']):
+                                    if download_mode == 'video':
+                                        # מוצא את הפורמט הטוב ביותר של וידאו
+                                        video_formats = [f for f in formats_info['formats'] 
+                                                       if 'video only' in str(f.get('format_note', '')) 
+                                                       and 'm3u8' in str(f.get('protocol', ''))]
+                                        video_formats.sort(key=lambda x: int(x.get('tbr', 0)), reverse=True)
+                                        
+                                        # מוצא את פורמט האודיו
+                                        audio_formats = [f for f in formats_info['formats'] 
+                                                       if 'audio only' in str(f.get('format_note', '')) 
+                                                       and 'm3u8' in str(f.get('protocol', ''))]
+                                        
+                                        if video_formats and audio_formats:
+                                            format_spec = f"{video_formats[0]['format_id']}+{audio_formats[0]['format_id']}"
+                                        else:
+                                            format_spec = video_formats[0]['format_id'] if video_formats else 'best'
                                     else:
-                                        format_spec = 'best'
-                                else:
-                                    # עבור אודיו בלבד
-                                    audio_formats = [f for f in formats_info['formats'] if 'audio only' in str(f.get('format_note', ''))]
-                                    if audio_formats:
-                                        format_spec = audio_formats[0]['format_id']
-                                    else:
-                                        format_spec = 'bestaudio'
+                                        # עבור אודיו בלבד
+                                        audio_formats = [f for f in formats_info['formats'] 
+                                                       if 'audio only' in str(f.get('format_note', '')) 
+                                                       and 'm3u8' in str(f.get('protocol', ''))]
+                                        format_spec = audio_formats[0]['format_id'] if audio_formats else 'bestaudio'
                                 
                                 # מנסה להוריד עם הפורמט שנבחר
                                 ydl_opts['listformats'] = False
