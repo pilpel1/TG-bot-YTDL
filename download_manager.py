@@ -244,14 +244,14 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             }] if download_mode == 'video' else [],
             'noplaylist': True,
             'socket_timeout': 120,
-            'outtmpl': '%(title)s.%(ext)s',  # תבנית בסיסית, תשומש על ידי custom_filename
+            'outtmpl': '%(id)s.%(ext)s',  # משתמש במזהה כברירת מחדל
             'outtmpl_na_placeholder': 'unknown_title',
             'progress_hooks': [],
             'outtmpl_func': custom_filename,
             'paths': {'home': str(DOWNLOADS_DIR)},
             'writesubtitles': False,
             'writethumbnail': True if download_mode == 'video' else False,
-            'outtmpl_thumbnail': lambda info_dict: custom_filename(info_dict, prefix='thumb')
+            'outtmpl_thumbnail': '%(id)s.%(ext)s'  # משתמש במזהה גם לתמונות ממוזערות
         }
         
         if not is_playlist:
