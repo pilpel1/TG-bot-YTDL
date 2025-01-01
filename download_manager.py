@@ -7,6 +7,7 @@ from config import DOWNLOADS_DIR, MAX_FILE_SIZE
 import asyncio
 import re
 import uuid
+import subprocess
 
 def clean_filename(filename):
     """מנקה שם קובץ מתווים לא חוקיים ומקצר אותו אם צריך"""
@@ -308,12 +309,30 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 }
             })
 
+            try:
+                # בדיקה אם ffmpeg מותקן
+                subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                logger.error("FFmpeg is not installed or not accessible")
+                raise Exception("FFmpeg is required for downloading this video")
+
             # הוספת מידע נוסף לבקשה
             ydl_opts['http_headers'].update({
                 'DNT': '1',
                 'TE': 'trailers',
                 'Cache-Control': 'no-cache',
                 'Pragma': 'no-cache'
+            })
+
+            # הגדרות נוספות ל-HLS
+            ydl_opts.update({
+                'hls_use_mpegts': True,
+                'fragment_retries': 10,
+                'skip_unavailable_fragments': False,
+                'downloader': 'ffmpeg',
+                'downloader_options': {
+                    'ffmpeg_location': 'ffmpeg'
+                }
             })
 
         if not is_playlist:
