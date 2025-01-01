@@ -273,11 +273,28 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 info = ydl.extract_info(url, download=True)
             except yt_dlp.utils.DownloadError as e:
                 if "Requested format is not available" in str(e):
-                    logger.info("Requested format not available, trying with best available format")
-                    # מנסה להוריד בפורמט הכי טוב שזמין
-                    ydl_opts['format'] = 'best' if download_mode == 'video' else 'bestaudio'
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl_retry:
-                        info = ydl_retry.extract_info(url, download=True)
+                    logger.info("Requested format not available, checking available formats...")
+                    # בודק אילו פורמטים זמינים
+                    ydl_opts['listformats'] = True
+                    ydl_opts['quiet'] = True
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl_list:
+                        try:
+                            formats_info = ydl_list.extract_info(url, download=False)
+                            if formats_info and 'formats' in formats_info:
+                                available_formats = [f"{f['format_id']}: {f.get('ext', 'N/A')} - {f.get('format_note', 'N/A')}" 
+                                                   for f in formats_info['formats']]
+                                logger.info(f"Available formats: {available_formats}")
+                                
+                                # מנסה להוריד בפורמט הכי טוב שזמין
+                                ydl_opts['listformats'] = False
+                                ydl_opts['format'] = 'best' if download_mode == 'video' else 'bestaudio'
+                                with yt_dlp.YoutubeDL(ydl_opts) as ydl_retry:
+                                    info = ydl_retry.extract_info(url, download=True)
+                            else:
+                                raise Exception("No formats available")
+                        except Exception as format_error:
+                            logger.error(f"Error checking formats: {str(format_error)}")
+                            raise
                 else:
                     raise
 
