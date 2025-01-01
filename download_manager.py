@@ -285,9 +285,40 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                                    for f in formats_info['formats']]
                                 logger.info(f"Available formats: {available_formats}")
                                 
-                                # מנסה להוריד בפורמט הכי טוב שזמין
+                                # מוחר את הפורמט המתאים ביותר
+                                if download_mode == 'video':
+                                    # מחפש את הפורמט הטוב ביותר של וידאו + אודיו
+                                    video_format = None
+                                    audio_format = None
+                                    
+                                    # מוצא את פורמט הוידאו הטוב ביותר
+                                    for f in formats_info['formats']:
+                                        if 'video only' in str(f.get('format_note', '')):
+                                            if not video_format or int(f.get('tbr', 0)) > int(video_format.get('tbr', 0)):
+                                                video_format = f
+                                    
+                                    # מוצא את פורמט האודיו
+                                    for f in formats_info['formats']:
+                                        if 'audio only' in str(f.get('format_note', '')):
+                                            audio_format = f
+                                            break
+                                    
+                                    if video_format and audio_format:
+                                        format_spec = f"{video_format['format_id']}+{audio_format['format_id']}"
+                                    else:
+                                        format_spec = 'best'
+                                else:
+                                    # עבור אודיו בלבד
+                                    audio_formats = [f for f in formats_info['formats'] if 'audio only' in str(f.get('format_note', ''))]
+                                    if audio_formats:
+                                        format_spec = audio_formats[0]['format_id']
+                                    else:
+                                        format_spec = 'bestaudio'
+                                
+                                # מנסה להוריד עם הפורמט שנבחר
                                 ydl_opts['listformats'] = False
-                                ydl_opts['format'] = 'best' if download_mode == 'video' else 'bestaudio'
+                                ydl_opts['format'] = format_spec
+                                logger.info(f"Trying to download with format: {format_spec}")
                                 with yt_dlp.YoutubeDL(ydl_opts) as ydl_retry:
                                     info = ydl_retry.extract_info(url, download=True)
                             else:
