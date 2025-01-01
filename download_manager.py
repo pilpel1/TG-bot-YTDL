@@ -298,47 +298,38 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                 # מוחר פורמט ספציפי עבור HLS
                                 if any('m3u8' in str(f.get('protocol', '')) for f in formats_info['formats']):
                                     if download_mode == 'video':
-                                        # מוצא את הפורמט הטוב ביותר של וידאו
+                                        # מוצא את כל פורמטי הוידאו
                                         video_formats = [f for f in formats_info['formats'] 
                                                        if 'video only' in str(f.get('format_note', '')) 
                                                        and 'm3u8' in str(f.get('protocol', ''))]
                                         
-                                        # מוצא את פורמט האודיו
-                                        audio_formats = [f for f in formats_info['formats'] 
-                                                       if 'audio only' in str(f.get('format_note', ''))]
-                                        
-                                        if video_formats and audio_formats:
-                                            # בוחר את הפורמט הספציפי לפי האיכות המבוקשת
-                                            quality_height = int(quality.get('height', 1080))
+                                        if video_formats:
+                                            # ממיין לפי איכות
                                             video_formats.sort(key=lambda x: int(x.get('height', 0)), reverse=True)
+                                            quality_height = int(quality.get('height', 1080))
                                             
-                                            # מוצא את הפורמט הקרוב ביותר לאיכות המבוקשת
+                                            # בוחר את הפורמט המתאים
                                             chosen_format = None
                                             for fmt in video_formats:
                                                 if fmt.get('height', 0) <= quality_height:
                                                     chosen_format = fmt
                                                     break
                                             
-                                            if not chosen_format and video_formats:
-                                                chosen_format = video_formats[-1]
+                                            if not chosen_format:
+                                                chosen_format = video_formats[-1]  # הפורמט הנמוך ביותר אם לא מצאנו מתאים
                                             
-                                            # בוחר את הפורמט הטוב ביותר מבין akfire או fastly
-                                            audio_format = audio_formats[0]
-                                            if 'akfire_interconnect_quic' in chosen_format['format_id']:
-                                                audio_format = next((f for f in audio_formats if 'akfire_interconnect_quic' in f['format_id']), audio_formats[0])
-                                            elif 'fastly_skyfire' in chosen_format['format_id']:
-                                                audio_format = next((f for f in audio_formats if 'fastly_skyfire' in f['format_id']), audio_formats[0])
-                                            
-                                            format_spec = f"{chosen_format['format_id']}+{audio_format['format_id']}"
-                                            logger.info(f"Selected format: video={chosen_format['format_id']} ({chosen_format.get('height', 'N/A')}p), audio={audio_format['format_id']}")
+                                            # משתמש בפורמט הספציפי
+                                            format_spec = chosen_format['format_id']
+                                            logger.info(f"Selected format: {format_spec} ({chosen_format.get('height', 'N/A')}p)")
                                         else:
-                                            raise Exception("Could not find compatible video and audio formats")
+                                            raise Exception("Could not find compatible video format")
                                     else:
-                                        # עבור אודיו בלבד
+                                        # עבור אודיו בלבד - משתמש בפורמט הראשון שזמין
                                         audio_formats = [f for f in formats_info['formats'] 
                                                        if 'audio only' in str(f.get('format_note', ''))]
                                         if audio_formats:
                                             format_spec = audio_formats[0]['format_id']
+                                            logger.info(f"Selected audio format: {format_spec}")
                                         else:
                                             raise Exception("Could not find compatible audio format")
                                 else:
