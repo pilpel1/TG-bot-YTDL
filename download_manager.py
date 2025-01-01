@@ -269,7 +269,18 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             )
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+            try:
+                info = ydl.extract_info(url, download=True)
+            except yt_dlp.utils.DownloadError as e:
+                if "Requested format is not available" in str(e):
+                    logger.info("Requested format not available, trying with best available format")
+                    # מנסה להוריד בפורמט הכי טוב שזמין
+                    ydl_opts['format'] = 'best' if download_mode == 'video' else 'bestaudio'
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl_retry:
+                        info = ydl_retry.extract_info(url, download=True)
+                else:
+                    raise
+
             if not info:
                 raise Exception("Could not download video")
             
