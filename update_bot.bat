@@ -2,7 +2,7 @@
 @echo [^>^>] Starting backup process...
 
 :: הגדרת בראנץ' ברירת מחדל
-set BRANCH=main
+set BRANCH=tiktok-fix
 
 :: אם הועבר פרמטר, השתמש בו כבראנץ'
 if not "%1"=="" set BRANCH=%1
