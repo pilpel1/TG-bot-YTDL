@@ -1,4 +1,4 @@
-@echo on
+@echo off
 @echo [^>^>] Activating virtual environment...
 
 :: הפעלת הסביבה הווירטואלית

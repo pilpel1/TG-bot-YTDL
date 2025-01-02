@@ -1,4 +1,4 @@
-@echo on
+@echo off
 @echo [^>^>] Starting backup process...
 
 :: הגדרת בראנץ' ברירת מחדל
