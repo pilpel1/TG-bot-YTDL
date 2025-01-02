@@ -231,8 +231,6 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 ext = info_dict.get('ext', 'mp4')
                 return str(DOWNLOADS_DIR / f"{filename}.{ext}")
 
-        # הגדרות מותאמות עבור Vimeo
-        is_vimeo = 'vimeo.com' in url
         ydl_opts = {
             'format': format_spec,
             'writethumbnail': True if download_mode == 'video' else False,
@@ -257,92 +255,69 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
-            'youtube_include_dash_manifest': False,
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
                 'Accept-Language': 'en-US,en;q=0.9',
                 'Accept-Encoding': 'gzip, deflate, br',
                 'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
-                'Sec-Fetch-Dest': 'document',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'none',
-                'Sec-Fetch-User': '?1',
-                'Origin': 'https://vimeo.com',
-                'Referer': 'https://vimeo.com/'
+                'Upgrade-Insecure-Requests': '1'
             }
         }
 
-        # הגדרות נוספות עבור Vimeo
-        if is_vimeo:
+        # הגדרות ספציפיות לפלטפורמות
+        if 'tiktok.com' in url:
             ydl_opts.update({
-                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best' if download_mode == 'video' else 'bestaudio[ext=m4a]/bestaudio',
-                'allow_unplayable_formats': True,
-                'hls_prefer_native': False,
-                'hls_split_discontinuity': True,
-                'external_downloader': 'ffmpeg',
-                'external_downloader_args': {
-                    'ffmpeg_i': [
-                        '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        '-headers', 'Accept: */*',
-                        '-headers', 'Origin: https://vimeo.com',
-                        '-headers', 'Referer: https://vimeo.com/',
-                        '-reconnect', '1',
-                        '-reconnect_streamed', '1',
-                        '-reconnect_delay_max', '5',
-                        '-multiple_requests', '1'
-                    ]
+                'format': 'best[ext=mp4]/best',  # TikTok מעדיף MP4
+                'extractor_args': {
+                    'tiktok': {
+                        'embed_url': ['0'],
+                        'api_hostname': ['api16-normal-c-useast1a.tiktokv.com'],
+                        'app_version': ['2.3.0'],
+                        'manifest_app_version': ['2.3.0']
+                    }
                 },
-                'http_chunk_size': 10485760,
-                'merge_output_format': 'mp4',
-                'concurrent_fragment_downloads': 1,
-                'downloader_options': {
-                    'http_chunk_size': 10485760,
+                'http_headers': {
+                    **ydl_opts['http_headers'],
+                    'User-Agent': 'TikTok 26.2.0 rv:262018 (iPhone; iOS 14.4.2; en_US) Cronet',
+                    'Cookie': 'tt_webid_v2=1234567890',
+                    'Referer': 'https://www.tiktok.com/'
+                }
+            })
+        elif 'x.com' in url or 'twitter.com' in url:
+            ydl_opts.update({
+                'format': 'best[ext=mp4]/best',
+                'http_headers': {
+                    **ydl_opts['http_headers'],
+                    'Authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs=1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
+                    'Referer': 'https://twitter.com/'
+                }
+            })
+        elif 'instagram.com' in url:
+            ydl_opts.update({
+                'format': 'best[ext=mp4]/best',
+                'http_headers': {
+                    **ydl_opts['http_headers'],
+                    'User-Agent': 'Instagram 219.0.0.12.117 Android',
+                    'Cookie': 'sessionid=1234567890',
+                    'Referer': 'https://www.instagram.com/'
                 },
                 'extractor_args': {
-                    'vimeo': {
-                        'force_progressive': ['true'],
-                        'prefer_stream': ['progressive'],
-                        'prefer_server': ['akfire_interconnect_quic']
+                    'instagram': {
+                        'client_id': ['936619743392459'],
+                        'app_version': ['219.0.0.12.117']
                     }
                 }
             })
-
-            try:
-                # בדיקה אם ffmpeg מותקן
-                subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                logger.error("FFmpeg is not installed or not accessible")
-                raise Exception("FFmpeg is required for downloading this video")
-
-            # הוספת מידע נוסף לבקשה
-            ydl_opts['http_headers'].update({
-                'DNT': '1',
-                'TE': 'trailers',
-                'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache',
-                'X-Requested-With': 'XMLHttpRequest'
-            })
-
-            # הגדרות נוספות ל-HLS
+        elif 'facebook.com' in url or 'fb.watch' in url:
             ydl_opts.update({
-                'hls_use_mpegts': True,
-                'fragment_retries': 10,
-                'skip_unavailable_fragments': False,
-                'downloader': 'ffmpeg',
-                'downloader_options': {
-                    'ffmpeg_location': 'ffmpeg'
+                'format': 'best[ext=mp4]/best',
+                'http_headers': {
+                    **ydl_opts['http_headers'],
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                    'Referer': 'https://www.facebook.com/'
                 }
-            })
-
-            # הגדרות ספציפיות לטיפול ב-XML
-            ydl_opts.update({
-                'extract_flat': 'in_playlist',
-                'no_check_formats': True,
-                'no_check_certificates': True,
-                'prefer_insecure': True,
-                'legacy_server_connect': True
             })
 
         if not is_playlist:
