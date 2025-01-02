@@ -297,7 +297,6 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     'Authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs=1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
                     'Referer': 'https://twitter.com/',
                     'Origin': 'https://twitter.com',
-                    'Host': 'api.twitter.com',
                     'x-twitter-active-user': 'yes',
                     'x-twitter-auth-type': 'OAuth2Session',
                     'x-twitter-client-language': 'en',
