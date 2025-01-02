@@ -285,14 +285,27 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 }
             })
         elif 'x.com' in url or 'twitter.com' in url:
+            is_x_domain = 'x.com' in url
+            base_domain = 'x.com' if is_x_domain else 'twitter.com'
+            
             ydl_opts.update({
                 'format': 'best[ext=mp4]/best',
                 'http_headers': {
                     **ydl_opts['http_headers'],
                     'Authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs=1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
-                    'Referer': 'https://twitter.com/'
+                    'Referer': f'https://{base_domain}/',
+                    'Origin': f'https://{base_domain}',
+                    'Host': base_domain,
+                    'x-twitter-active-user': 'yes',
+                    'x-twitter-auth-type': 'OAuth2Session',
+                    'x-twitter-client-language': 'en'
                 }
             })
+            
+            # if is_x_domain:
+            #     # המרה אוטומטית של הקישור מ-x.com ל-twitter.com
+            #     url = url.replace('x.com', 'twitter.com')
+            #     logger.info(f"Converting X URL to Twitter URL: {url}")
         elif 'instagram.com' in url:
             ydl_opts.update({
                 'format': 'best[ext=mp4]/best',
