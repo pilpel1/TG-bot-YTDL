@@ -1,5 +1,5 @@
-@echo off
-echo [>>] Starting backup process...
+@echo on
+@echo [^>^>] Starting backup process...
 
 :: הגדרת בראנץ' ברירת מחדל
 set BRANCH=main
@@ -16,14 +16,14 @@ copy .env backup\.env
 :: העתקת תיקיית הלוגים
 xcopy /s /i /Y logs backup\logs
 
-echo [>>] Updating code from git (branch: %BRANCH%)...
+@echo [^>^>] Updating code from git (branch: %BRANCH%)...
 git fetch origin
 git pull origin %BRANCH%
 
-echo [>>] Restoring backup files...
+@echo [^>^>] Restoring backup files...
 :: שחזור הקבצים החשובים
 copy backup\.env .env
 xcopy /s /i /Y backup\logs logs
 
-echo [>>] Update completed successfully!
+@echo [^>^>] Update completed successfully!
 pause 
