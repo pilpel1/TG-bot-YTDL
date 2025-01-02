@@ -302,10 +302,10 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 }
             })
             
-            # if is_x_domain:
-            #     # המרה אוטומטית של הקישור מ-x.com ל-twitter.com
-            #     url = url.replace('x.com', 'twitter.com')
-            #     logger.info(f"Converting X URL to Twitter URL: {url}")
+            if is_x_domain:
+                # המרה אוטומטית של הקישור מ-x.com ל-twitter.com
+                url = url.replace('x.com', 'twitter.com')
+                logger.info(f"Converting X URL to Twitter URL: {url}")
         elif 'instagram.com' in url:
             ydl_opts.update({
                 'format': 'best[ext=mp4]/best',
