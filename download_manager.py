@@ -307,7 +307,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 },
                 'extractor_args': {
                     'twitter': {
-                        'api': ['api'],
+                        'api': ['syndication'],
                     }
                 }
             })
