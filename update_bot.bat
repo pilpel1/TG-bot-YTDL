@@ -2,7 +2,7 @@
 echo מתחיל גיבוי קבצים חשובים...
 
 :: הגדרת בראנץ' ברירת מחדל
-set BRANCH=twitter-download
+set BRANCH=main
 
 :: אם הועבר פרמטר, השתמש בו כבראנץ'
 if not "%1"=="" set BRANCH=%1
