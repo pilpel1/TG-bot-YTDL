@@ -178,6 +178,11 @@ async def download_with_quality(context, status_message, url, download_mode, qua
     thumbnail_file = None
     
     try:
+        # המרת קישורי X לטוויטר בתחילת התהליך
+        if 'x.com' in url:
+            url = url.replace('x.com', 'twitter.com')
+            logger.info(f"Converting X URL to Twitter URL: {url}")
+
         # בדיקה אם זה פלייליסט
         if not is_playlist:
             try:
@@ -284,28 +289,28 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     'Referer': 'https://www.tiktok.com/'
                 }
             })
-        elif 'x.com' in url or 'twitter.com' in url:
-            is_x_domain = 'x.com' in url
-            base_domain = 'x.com' if is_x_domain else 'twitter.com'
-            
+        elif 'twitter.com' in url:
             ydl_opts.update({
                 'format': 'best[ext=mp4]/best',
                 'http_headers': {
                     **ydl_opts['http_headers'],
                     'Authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs=1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
-                    'Referer': f'https://{base_domain}/',
-                    'Origin': f'https://{base_domain}',
-                    'Host': base_domain,
+                    'Referer': 'https://twitter.com/',
+                    'Origin': 'https://twitter.com',
+                    'Host': 'twitter.com',
                     'x-twitter-active-user': 'yes',
                     'x-twitter-auth-type': 'OAuth2Session',
-                    'x-twitter-client-language': 'en'
+                    'x-twitter-client-language': 'en',
+                    'Accept': 'application/json, text/javascript, */*; q=0.01',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                'extractor_args': {
+                    'twitter': {
+                        'api': ['graphql'],
+                    }
                 }
             })
-            
-            if is_x_domain:
-                # המרה אוטומטית של הקישור מ-x.com ל-twitter.com
-                url = url.replace('x.com', 'twitter.com')
-                logger.info(f"Converting X URL to Twitter URL: {url}")
         elif 'instagram.com' in url:
             ydl_opts.update({
                 'format': 'best[ext=mp4]/best',
