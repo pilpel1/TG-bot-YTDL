@@ -272,21 +272,33 @@ async def download_with_quality(context, status_message, url, download_mode, qua
 
         # הגדרות ספציפיות לפלטפורמות
         if 'tiktok.com' in url:
+            # המרת קישור מקוצר לקישור מלא
+            if 'vt.tiktok.com' in url:
+                logger.info("Converting shortened TikTok URL...")
+                url = url.replace('vt.tiktok.com', 'www.tiktok.com')
+            
             ydl_opts.update({
-                'format': 'best[ext=mp4]/best',  # TikTok מעדיף MP4
+                'format': 'best[ext=mp4]/best',
                 'extractor_args': {
                     'tiktok': {
                         'embed_url': ['0'],
-                        'api_hostname': ['api16-normal-c-useast1a.tiktokv.com'],
+                        'api_hostname': ['api22-normal-c-useast2a.tiktokv.com'],
                         'app_version': ['2.3.0'],
-                        'manifest_app_version': ['2.3.0']
+                        'manifest_app_version': ['2.3.0'],
+                        'use_api': ['1']
                     }
                 },
                 'http_headers': {
                     **ydl_opts['http_headers'],
-                    'User-Agent': 'TikTok 26.2.0 rv:262018 (iPhone; iOS 14.4.2; en_US) Cronet',
-                    'Cookie': 'tt_webid_v2=1234567890',
-                    'Referer': 'https://www.tiktok.com/'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Referer': 'https://www.tiktok.com/',
+                    'Origin': 'https://www.tiktok.com',
+                    'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                    'sec-ch-ua-mobile': '?0',
+                    'sec-ch-ua-platform': '"Windows"',
+                    'sec-fetch-dest': 'empty',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-site': 'same-site'
                 }
             })
         elif 'twitter.com' in url:
