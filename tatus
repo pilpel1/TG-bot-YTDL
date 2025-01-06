@@ -1,0 +1,5 @@
+[33mcommit 20cbcace46ab25f9a8ffa1cd2cca272e5b7609e6[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: pilpel1 <avichay.c@gmail.com>
+Date:   Mon Jan 6 15:41:29 2025 +0200
+
+    Change default branch in update_bot.bat from 'tiktok-fix' back to 'main'
