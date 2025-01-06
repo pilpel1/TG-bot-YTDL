@@ -329,20 +329,28 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 'format': 'best[ext=mp4]/best',
                 'http_headers': {
                     **ydl_opts['http_headers'],
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Referer': 'https://www.instagram.com/',
-                    'Origin': 'https://www.instagram.com',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.5',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'X-IG-App-ID': '936619743392459'
+                    'User-Agent': 'Instagram 219.0.0.12.117 Android',
+                    'Accept': '*/*',
+                    'Accept-Language': 'en-US',
+                    'Accept-Encoding': 'gzip, deflate',
+                    'X-IG-Capabilities': '3brTvw==',
+                    'X-IG-Connection-Type': 'WIFI',
+                    'X-IG-App-ID': '567067343352427',
+                    'X-FB-HTTP-Engine': 'Liger',
+                    'Connection': 'keep-alive',
+                    'Pragma': 'no-cache',
+                    'Authorization': 'Bearer IGT:2:eyJkc191c2VyX2lkIjoiNTY3MDY3MzQzMzUyNDI3IiwiaWciOiIyMTkuMC4wLjEyLjExNyJ9'
                 },
                 'extractor_args': {
                     'instagram': {
-                        'api': ['graphql'],
-                        'webpage_type': ['graphql'],
-                        'webpage_api': ['graphql'],
-                        'no_private': ['true']
+                        'api_key': ['567067343352427'],
+                        'app_version': ['219.0.0.12.117'],
+                        'android_release': ['13'],
+                        'android_version': ['33'],
+                        'phone_manufacturer': ['samsung'],
+                        'phone_model': ['SM-G973F'],
+                        'phone_device': ['beyond1'],
+                        'locale': ['en_US']
                     }
                 },
                 'outtmpl': str(DOWNLOADS_DIR / '%(uploader)s_%(title)s_%(id)s.%(ext)s'),
