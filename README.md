@@ -22,7 +22,7 @@
 
 1. שכפל את המאגר:
 ```bash
-git clone [URL של המאגר שלך]
+git clone https://github.com/pilpel1/TG-bot-YTDL.git
 cd TG-bot-YTDL
 ```
 
