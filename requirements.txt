@@ -1,4 +1,5 @@
 python-telegram-bot==20.7
-yt-dlp==2024.12.23
+yt-dlp==2024.3.10
+requests>=2.31.0
 python-dotenv==1.0.0 
 brotli>=1.0.9 

@@ -8,6 +8,7 @@ import asyncio
 import re
 import uuid
 import subprocess
+import requests
 
 def clean_filename(filename):
     """מנקה שם קובץ מתווים לא חוקיים ומקצר אותו אם צריך"""
@@ -275,7 +276,8 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             # המרת קישור מקוצר לקישור מלא
             if 'vt.tiktok.com' in url:
                 logger.info("Converting shortened TikTok URL...")
-                url = url.replace('vt.tiktok.com', 'www.tiktok.com')
+                url = resolve_tiktok_url(url)
+                logger.info(f"Resolved URL: {url}")
             
             ydl_opts.update({
                 'format': 'best[ext=mp4]/best',
@@ -500,3 +502,12 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 thumbnail_file.unlink()
             except Exception as e:
                 logger.error(f"Error deleting thumbnail {thumbnail_file}: {e}")
+
+def resolve_tiktok_url(url):
+    """מקבל קישור מקוצר של טיקטוק ומחזיר את הקישור המלא"""
+    try:
+        response = requests.head(url, allow_redirects=True)
+        return response.url
+    except Exception as e:
+        logger.error(f"Error resolving TikTok URL: {e}")
+        return url
