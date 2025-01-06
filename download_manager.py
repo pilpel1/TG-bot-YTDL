@@ -339,11 +339,16 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 'extractor_args': {
                     'instagram': {
                         'client_id': ['936619743392459'],
-                        'app_version': ['219.0.0.12.117']
+                        'app_version': ['219.0.0.12.117'],
+                        'extract_flat': ['true'],
+                        'webpage_type': ['graphql'],
+                        'access_token': ['6628568379|c1e620fa708418d6897468d92a5c8c66']  # טוקן גנרי של אינסטגרם
                     }
                 },
                 'outtmpl': str(DOWNLOADS_DIR / '%(uploader)s_%(title)s_%(id)s.%(ext)s'),
-                'add_metadata': True
+                'add_metadata': True,
+                'no_check_certificate': True,
+                'ignore_no_formats_error': True
             })
         elif 'facebook.com' in url or 'fb.watch' in url:
             ydl_opts.update({
