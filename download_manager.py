@@ -334,15 +334,15 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     'Origin': 'https://www.instagram.com',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
                     'Accept-Language': 'en-US,en;q=0.5',
-                    'X-Requested-With': 'XMLHttpRequest'
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-IG-App-ID': '936619743392459'
                 },
                 'extractor_args': {
                     'instagram': {
-                        'client_id': ['936619743392459'],
-                        'app_version': ['219.0.0.12.117'],
-                        'extract_flat': ['true'],
+                        'api': ['graphql'],
                         'webpage_type': ['graphql'],
-                        'access_token': ['6628568379|c1e620fa708418d6897468d92a5c8c66']  # טוקן גנרי של אינסטגרם
+                        'webpage_api': ['graphql'],
+                        'no_private': ['true']
                     }
                 },
                 'outtmpl': str(DOWNLOADS_DIR / '%(uploader)s_%(title)s_%(id)s.%(ext)s'),
