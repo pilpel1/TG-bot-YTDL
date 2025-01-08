@@ -63,13 +63,35 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     
-    # בדיקה האם זו הודעת תודה
-    if is_thank_you_message(text):
-        await handle_thank_you(update, context)
-        return
+    # בדיק� מקדימות
+    is_thank = is_thank_you_message(text)
+    words = text.split()
+    valid_urls = [word for word in words if is_valid_url(word)]
     
-    # אם זו לא הודעת תודה, בודקים אם זה URL
-    if not is_valid_url(text):
+    # מבצע את הפעולות הנדרשות
+    if is_thank:
+        # שולח תודה
+        await handle_thank_you(update, context)
+    
+    if valid_urls:
+        # מתייחס לקישור הראשון שנמצא
+        url = valid_urls[0]
+        context.user_data['current_url'] = url
+        
+        # בדיקה האם זה קישור יוטיוב
+        is_youtube = 'youtube.com' in url or 'youtu.be' in url
+        context.user_data['is_youtube'] = is_youtube
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("אודיו 🎵", callback_data='audio'),
+                InlineKeyboardButton("וידאו 🎥", callback_data='video')
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text('מה תרצה להוריד?', reply_markup=reply_markup)
+    elif not is_thank:
+        # אם אין URL וגם אין תודה, שולח הודעת הסבר
         await update.message.reply_text(
             "אנא שלח קישור תקין (URL) מאחד מהאתרים הבאים:\n"
             "• יוטיוב\n"
@@ -79,22 +101,6 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• טיקטוק\n\n"
             "ניתן לנסות גם קישורים מאתרי מדיה פופולריים אחרים 😊"
         )
-        return
-    
-    context.user_data['current_url'] = text
-    
-    # בדיקה האם זה קישור יוטיוב
-    is_youtube = 'youtube.com' in text or 'youtu.be' in text
-    context.user_data['is_youtube'] = is_youtube
-    
-    keyboard = [
-        [
-            InlineKeyboardButton("אודיו 🎵", callback_data='audio'),
-            InlineKeyboardButton("וידאו 🎥", callback_data='video')
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text('מה תרצה להוריד?', reply_markup=reply_markup)
 
 async def ask_quality(message, download_mode):
     """שואל את המשתמש באיזו איכות הוא רוצה להוריד"""

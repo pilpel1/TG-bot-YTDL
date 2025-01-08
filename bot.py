@@ -36,10 +36,6 @@ def main():
         
         # Add handlers
         application.add_handler(CommandHandler('start', start))
-        application.add_handler(MessageHandler(
-            filters.Regex(r'.*תודה.*') & ~filters.Regex(r'.*youtube\.com.*|.*youtu\.be.*'), 
-            handle_thank_you
-        ))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ask_format))
         application.add_handler(CallbackQueryHandler(button_click))
         
