@@ -359,13 +359,47 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 'ignore_no_formats_error': True
             })
         elif 'facebook.com' in url or 'fb.watch' in url:
+            # הודעה זמנית על חוסר תמיכה
+            logger.info("Facebook download attempted - currently unsupported")
+            if not is_playlist:
+                await safe_edit_message(
+                    status_message,
+                    'הורדה מפייסבוק לא זמינה כרגע עקב שינויים במערכת של פייסבוק. אנחנו עובדים על פתרון 🔧'
+                )
+            return False
+
+            # ניקוי והמרת הקישור
+            if 'share/v/' in url:
+                video_id = url.split('/v/')[-1].split('/')[0]
+                url = f'https://www.facebook.com/watch?v={video_id}'
+            elif 'fb.watch' in url:
+                video_id = url.split('/')[-1].split('?')[0]
+                url = f'https://www.facebook.com/watch?v={video_id}'
+            
+            logger.info(f"Converted Facebook URL: {url}")
+            
             ydl_opts.update({
-                'format': 'best[ext=mp4]/best',
+                'format': 'dash,progressive',
+                'extract_flat': False,
+                'ignore_no_formats_error': True,
                 'http_headers': {
-                    **ydl_opts['http_headers'],
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                    'Referer': 'https://www.facebook.com/'
+                    'Accept': '*/*',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Origin': 'https://www.facebook.com',
+                    'Referer': 'https://www.facebook.com/',
+                    'Sec-Fetch-Dest': 'empty',
+                    'Sec-Fetch-Mode': 'cors',
+                    'Sec-Fetch-Site': 'same-origin'
+                },
+                'socket_timeout': 30,
+                'extractor_args': {
+                    'facebook': {
+                        'access_token': [''],
+                        'ap': ['true'],
+                        'download_api': ['true'],
+                        'format': ['dash,progressive']
+                    }
                 }
             })
 
