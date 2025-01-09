@@ -95,6 +95,13 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         is_youtube = 'youtube.com' in url or 'youtu.be' in url
         context.user_data['is_youtube'] = is_youtube
         
+        # אם יש יותר מקישור אחד, שולח הודעת הבהרה
+        if len(valid_urls) > 1:
+            await message.reply_text(
+                "זיהיתי מספר קישורים בהודעה שלך. אני אוריד את התוכן מהקישור הראשון.\n"
+                "אם תרצה להוריד גם מהקישורים הנוספים, אנא שלח כל קישור בהודעה נפרדת 😊"
+            )
+        
         keyboard = [
             [
                 InlineKeyboardButton("אודיו 🎵", callback_data='audio'),
