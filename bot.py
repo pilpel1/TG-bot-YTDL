@@ -36,7 +36,9 @@ def main():
         
         # Add handlers
         application.add_handler(CommandHandler('start', start))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ask_format))
+        
+        # תפיסת כל סוגי ההודעות חוץ מפקודות
+        application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, ask_format))
         application.add_handler(CallbackQueryHandler(button_click))
         
         # Add error handler

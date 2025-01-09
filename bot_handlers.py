@@ -57,11 +57,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
+    # בדיקת סוג ההודעה וטיפול בהתאם
+    message = update.message
     
-    # בדיק� מקדימות
-    is_thank = is_thank_you_message(text)
-    words = text.split()
+    # אם זו הודעת טקסט רגילה
+    if message.text:
+        text = message.text
+    # אם זו הודעת מדיה עם כיתוב
+    elif any([
+        message.photo,
+        message.video,
+        message.audio,
+        message.voice,
+        message.document,
+        message.sticker
+    ]):
+        text = message.caption or ""
+    else:
+        text = ""
+    
+    # בדיקות מקדימות
+    is_thank = is_thank_you_message(text) if text else False
+    words = text.split() if text else []
     valid_urls = [word for word in words if is_valid_url(word)]
     
     # מבצע את הפעולות הנדרשות
@@ -85,10 +102,10 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text('מה תרצה להוריד?', reply_markup=reply_markup)
+        await message.reply_text('מה תרצה להוריד?', reply_markup=reply_markup)
     elif not is_thank:
         # אם אין URL וגם אין תודה, שולח הודעת הסבר
-        await update.message.reply_text(
+        await message.reply_text(
             "אנא שלח קישור תקין (URL) מאחד מהאתרים הבאים:\n"
             "• יוטיוב\n"
             "• פייסבוק\n"
