@@ -453,74 +453,66 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             logger.info(f"File size: {size_mb}MB")
             
             if size_mb <= MAX_FILE_SIZE / (1024 * 1024):
-                # שליחת הקובץ עם ניסיונות חוזרים
-                max_retries = 3
-                last_error = None
-                
-                for attempt in range(max_retries):
-                    try:
-                        with open(current_file, 'rb') as f:
-                            if download_mode == 'audio':
-                                await status_message.reply_audio(
-                                    f,
-                                    title=info.get('title', 'Audio'),
-                                    performer=info.get('uploader', 'Unknown'),
-                                    duration=info.get('duration'),
-                                    read_timeout=120,
-                                    write_timeout=120,
-                                    connect_timeout=120,
-                                    pool_timeout=120
-                                )
-                            else:
-                                thumbnail_data = None
-                                if thumbnail_file and thumbnail_file.exists():
-                                    try:
-                                        with open(thumbnail_file, 'rb') as thumb:
-                                            thumbnail_data = thumb.read()
-                                    except Exception as e:
-                                        logger.error(f"Error reading thumbnail: {e}")
-                                
-                                await status_message.reply_video(
-                                    f,
-                                    caption=f"{info.get('title', '')}\n\n{info.get('description', '')}" if (info.get('title') or info.get('description')) else f"Video by {info.get('uploader', 'Unknown')}",
-                                    duration=info.get('duration'),
-                                    width=info.get('width', 0),
-                                    height=info.get('height', 0),
-                                    thumbnail=thumbnail_data if thumbnail_data else None,
-                                    supports_streaming=True,
-                                    read_timeout=120,
-                                    write_timeout=120,
-                                    connect_timeout=120,
-                                    pool_timeout=120
-                                )
-                        
-                        # רישום ההורדה
-                        log_download(
-                            username=get_user_identifier(status_message.chat),
-                            url=url,
-                            download_type=download_mode,
-                            filename=current_file.name
-                        )
-                        
-                        if not is_playlist:
-                            quality_msg = f" ({quality['quality_name']})" if quality['quality_name'] != 'איכות רגילה' else ""
-                            await safe_send_message(status_message, f'הנה הקובץ שלך!{quality_msg} 🎉')
-                            context.user_data.pop('current_quality_index', None)
-                        
-                        logger.info("File sent successfully")
-                        break  # יציאה מהלולאה אם השליחה הצליחה
-                        
-                    except telegram.error.TimedOut as e:
-                        last_error = e
-                        if attempt < max_retries - 1:
-                            logger.warning(f"Timeout on attempt {attempt + 1}, retrying...")
-                            await asyncio.sleep(2)
+                try:
+                    with open(current_file, 'rb') as f:
+                        if download_mode == 'audio':
+                            await status_message.reply_audio(
+                                f,
+                                title=info.get('title', 'Audio'),
+                                performer=info.get('uploader', 'Unknown'),
+                                duration=info.get('duration'),
+                                read_timeout=180,
+                                write_timeout=180,
+                                connect_timeout=180,
+                                pool_timeout=180
+                            )
                         else:
-                            raise Exception(f"Failed after {max_retries} attempts: {str(e)}")
+                            thumbnail_data = None
+                            if thumbnail_file and thumbnail_file.exists():
+                                try:
+                                    with open(thumbnail_file, 'rb') as thumb:
+                                        thumbnail_data = thumb.read()
+                                except Exception as e:
+                                    logger.error(f"Error reading thumbnail: {e}")
+                                
+                            await status_message.reply_video(
+                                f,
+                                caption=f"{info.get('title', '')}\n\n{info.get('description', '')}" if (info.get('title') or info.get('description')) else f"Video by {info.get('uploader', 'Unknown')}",
+                                duration=info.get('duration'),
+                                width=info.get('width', 0),
+                                height=info.get('height', 0),
+                                thumbnail=thumbnail_data if thumbnail_data else None,
+                                supports_streaming=True,
+                                read_timeout=180,
+                                write_timeout=180,
+                                connect_timeout=180,
+                                pool_timeout=180
+                            )
                     
-                    except Exception as e:
-                        last_error = e
-                        raise
+                    # רישום ההורדה
+                    log_download(
+                        username=get_user_identifier(status_message.chat),
+                        url=url,
+                        download_type=download_mode,
+                        filename=current_file.name
+                    )
+                    
+                    if not is_playlist:
+                        quality_msg = f" ({quality['quality_name']})" if quality['quality_name'] != 'איכות רגילה' else ""
+                        await safe_send_message(status_message, f'הנה הקובץ שלך!{quality_msg} 🎉')
+                        context.user_data.pop('current_quality_index', None)
+                    
+                    logger.info("File sent successfully")
+                
+                except telegram.error.TimedOut as e:
+                    logger.error(f"Timeout during file send: {str(e)}")
+                    if not is_playlist:
+                        await safe_edit_message(status_message, 'שליחת הקובץ נכשלה עקב זמן ממושך מדי. נסה שוב או בחר באיכות נמוכה יותר.')
+                    raise
+                
+                except Exception as e:
+                    logger.error(f"Error sending file: {str(e)}")
+                    raise
             
             else:
                 if not is_playlist:
