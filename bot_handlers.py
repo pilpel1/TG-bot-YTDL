@@ -40,11 +40,7 @@ def is_preferred_platform(url: str) -> bool:
 def is_thank_you_message(text: str) -> bool:
     """בודק האם ההודעה היא הודעת תודה"""
     thank_you_patterns = [
-        'תודה',
-        'תודה רבה',
-        'תודה לך',
-        'תודה על',
-        'תודה.*',
+        '.*תודה.*',
         'תנקס',
         'thanks',
         'thank you',
