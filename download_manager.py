@@ -189,12 +189,20 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             try:
                 with yt_dlp.YoutubeDL({'quiet': True, 'extract_flat': True}) as ydl:
                     info = ydl.extract_info(url, download=False)
+                    # בדיקת תוכן מוגבל
+                    if info.get('age_limit', 0) > 0 or info.get('content_warning'):
+                        await safe_edit_message(status_message, 'הסרטון מוגבל לצפייה, לא ניתן להוריד ⛔')
+                        raise Exception("Sign in to confirm your age")
+                    # בדיקת פלייליסט
                     if 'entries' in info:
                         await download_playlist(context, status_message, url, download_mode, quality)
                         return
             except Exception as e:
-                logger.error(f"Error checking if URL is playlist: {str(e)}")
-        
+                if "Sign in to confirm your age" in str(e):
+                    await safe_edit_message(status_message, 'הסרטון מוגבל לצפייה, לא ניתן להוריד ⛔')
+                    raise
+                logger.error(f"Error in pre-check: {str(e)}")
+
         # הגדרות בסיסיות עבור yt-dlp
         format_spec = quality['format']
         if download_mode == 'audio':
@@ -527,11 +535,14 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         logger.error(f"Error during download: {error_msg}")
         
         if not is_playlist:
-            if "Video unavailable" in error_msg:
+            if "Sign in to confirm your age" in error_msg:
+                await safe_edit_message(status_message, 'הסרטון מוגבל לצפייה, לא ניתן להוריד ⛔')
+                raise  # מעביר את השגיאה ל-error_handler
+            elif "Video unavailable" in error_msg:
                 await safe_edit_message(status_message, 'הסרטון לא זמין 😕')
             else:
                 await safe_edit_message(status_message, 'משהו השתבש בהורדה 😕')
-        raise  # מעביר את השגיאה הלאה כדי שdownload_playlist יוכל לטפל בה
+        raise  # מעביר את השגיאה הלאה
     
     finally:
         # ניקוי הקבצים הנוכחיים

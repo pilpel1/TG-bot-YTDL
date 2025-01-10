@@ -16,6 +16,12 @@ async def error_handler(update: Update, context):
                 await update.message.reply_text(
                     "חלה בעיית תקשורת, אנא נסה שוב 🔄"
                 )
+        elif any(msg in str(error) for msg in ["Sign in to confirm your age", "This video may be inappropriate for some users"]):
+            logger.warning(f"Restricted content error: {str(error)}")
+            if update and update.message:
+                await update.message.reply_text(
+                    "הסרטון מוגבל לצפייה, לא ניתן להוריד ⛔"
+                )
         else:
             # שגיאות אחרות
             logger.error(f"Error occurred: {str(error)}")
