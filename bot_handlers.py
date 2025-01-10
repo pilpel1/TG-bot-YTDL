@@ -1,7 +1,7 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from logger_setup import logger
-from config import YOUTUBE_QUALITY_LEVELS, DEFAULT_FORMAT
+from config import YOUTUBE_QUALITY_LEVELS, DEFAULT_FORMAT, VERSION, CHANGELOG
 from download_manager import download_with_quality
 import random
 import re
@@ -189,3 +189,7 @@ async def handle_thank_you(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """מטפל בהודעות תודה"""
     response = random.choice(THANK_YOU_RESPONSES)
     await update.message.reply_text(response) 
+
+async def version(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """הצגת מידע על הגרסה הנוכחית"""
+    await update.message.reply_text(f"{CHANGELOG}") 

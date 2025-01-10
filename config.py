@@ -18,7 +18,7 @@ DOWNLOADS_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
 # Download settings
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB limit
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB in bytes
 
 # Quality levels for YouTube videos
 YOUTUBE_QUALITY_LEVELS = [
@@ -40,4 +40,11 @@ YOUTUBE_QUALITY_LEVELS = [
 DEFAULT_FORMAT = {
     'format': 'best',
     'quality_name': 'איכות מקסימלית'
-} 
+}
+
+# Version info
+VERSION = "0.4.6"
+CHANGELOG = """🆕 גרסה 0.4.6:
+• תמיכה בסרטונים מוגבלים - הבוט יודיע כשסרטון לא זמין
+• שיפור הטיפול בפלייליסטים
+• תיקוני באגים ושיפורי יציבות""" 
