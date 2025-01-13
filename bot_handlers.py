@@ -1,10 +1,11 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from logger_setup import logger
 from config import YOUTUBE_QUALITY_LEVELS, DEFAULT_FORMAT, VERSION, CHANGELOG
 from download_manager import download_with_quality
 import random
 import re
+import asyncio
 
 THANK_YOU_RESPONSES = [
     "בכיף! 😊",
@@ -90,6 +91,7 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # מתייחס לקישור הראשון שנמצא
         url = valid_urls[0]
         context.user_data['current_url'] = url
+        context.user_data['download_state'] = 'choosing_format'  # מעקב אחרי המצב
         
         # בדיקה האם זה קישור יוטיוב
         is_youtube = 'youtube.com' in url or 'youtu.be' in url
@@ -109,7 +111,8 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await message.reply_text('מה תרצה להוריד?', reply_markup=reply_markup)
+        # שמירת ההודעה בקונטקסט
+        context.user_data['last_bot_message'] = await message.reply_text('מה תרצה להוריד?', reply_markup=reply_markup)
     elif not is_thank:
         # אם אין URL וגם אין תודה, שולח הודעת הסבר
         await message.reply_text(
@@ -122,7 +125,7 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "ניתן לנסות גם קישורים מאתרי מדיה פופולריים אחרים 😊"
         )
 
-async def ask_quality(message, download_mode):
+async def ask_quality(message, download_mode, context):
     """שואל את המשתמש באיזו איכות הוא רוצה להוריד"""
     keyboard = []
     
@@ -135,7 +138,8 @@ async def ask_quality(message, download_mode):
         ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await message.edit_text('באיזו איכות להוריד את הוידאו?', reply_markup=reply_markup)
+    # שמירת ההודעה בקונטקסט
+    context.user_data['last_bot_message'] = await message.edit_text('באיזו איכות להוריד את הוידאו?', reply_markup=reply_markup)
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -152,7 +156,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         context.user_data['current_quality_index'] = quality_index
+        context.user_data['download_state'] = 'downloading'
         status_message = await query.message.edit_text('מתחיל בהורדה... ⏳')
+        context.user_data['current_status_message'] = status_message  # שמירת הודעת הסטטוס
         
         await download_with_quality(
             context,
@@ -171,7 +177,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if download_mode == 'audio' or not is_youtube:
             # עבור אודיו או לא-יוטיוב - מתחילים הורדה מיד באיכות הטובה ביותר
+            context.user_data['download_state'] = 'downloading'
             status_message = await query.message.edit_text('מתחיל בהורדה... ⏳')
+            context.user_data['current_status_message'] = status_message  # שמירת הודעת הסטטוס
             quality = DEFAULT_FORMAT if not is_youtube else YOUTUBE_QUALITY_LEVELS[1]
             await download_with_quality(
                 context,
@@ -183,7 +191,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             # עבור וידאו מיוטיוב - שואלים על איכות
-            await ask_quality(query.message, download_mode)
+            context.user_data['download_state'] = 'choosing_quality'
+            await ask_quality(query.message, download_mode, context)
 
 async def handle_thank_you(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """מטפל בהודעות תודה"""
@@ -193,3 +202,68 @@ async def handle_thank_you(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def version(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """הצגת מידע על הגרסה הנוכחית"""
     await update.message.reply_text(f"{CHANGELOG}") 
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """מבטל את ההורדה הנוכחית"""
+    try:
+        # בדיקת המצב הנוכחי
+        current_state = context.user_data.get('download_state')
+        
+        if current_state in ['choosing_format', 'choosing_quality']:
+            # מחיקת ההודעה האחרונה עם הכפתורים
+            last_bot_message = context.user_data.get('last_bot_message')
+            if last_bot_message:
+                try:
+                    await last_bot_message.delete()
+                except Exception as e:
+                    logger.error(f"Error deleting message: {e}")
+            
+            # מנקה את המצב ומודיע למשתמש
+            context.user_data.clear()
+            await update.message.reply_text('הפעולה בוטלה 🚫')
+            return
+            
+        active_task = context.user_data.get('active_download_task')
+        if active_task and not active_task.done():
+            active_task.cancel()
+            # מחיקת הודעת ההורדה הנוכחית
+            current_status_message = context.user_data.get('current_status_message')
+            if current_status_message:
+                try:
+                    await current_status_message.delete()
+                except Exception as e:
+                    logger.error(f"Error deleting status message: {e}")
+            
+            await update.message.reply_text('ההורדה בוטלה 🚫')
+            return
+            
+        await update.message.reply_text('אין הורדה פעילה לביטול 🤔')
+    except Exception as e:
+        logger.error(f"Error in cancel command: {e}")
+        await update.message.reply_text('משהו השתבש בניסיון לבטל את ההורדה 😕')
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """הצגת הוראות שימוש"""
+    await update.message.reply_text(
+        'איך להשתמש בבוט:\n'
+        '1. שלח קישור לסרטון\n'
+        '2. בחר אם להוריד אודיו או וידאו\n'
+        '3. אם זה סרטון יוטיוב, בחר איכות\n\n'
+        'פקודות זמינות:\n'
+        '/start - התחלה\n'
+        '/help - עזרה\n'
+        '/version - מידע על הגרסה\n'
+        '/cancel - ביטול הורדה נוכחית'
+    )
+
+def register_handlers(application):
+    """רישום כל ה-handlers של הבוט"""
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("version", version))
+    application.add_handler(CommandHandler("cancel", cancel))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ask_format))
+    application.add_handler(CallbackQueryHandler(button_click))
+
+    # לוגינג לבדיקה
+    logger.info("Handlers registered successfully") 

@@ -64,121 +64,184 @@ def get_user_identifier(chat):
 async def download_playlist(context, status_message, url, download_mode, quality, playlist_info=None):
     """הורדת פלייליסט"""
     try:
-        format_spec = quality['format']
-        if download_mode == 'audio':
-            format_spec = 'bestaudio[ext=m4a]/best[ext=m4a]/bestaudio'
+        # יצירת משימה חדשה לפלייליסט
+        playlist_task = asyncio.create_task(
+            _perform_playlist_download(context, status_message, url, download_mode, quality, playlist_info)
+        )
+        context.user_data['active_download_task'] = playlist_task
         
-        logger.info(f"Starting playlist download for URL: {url}")
-        await safe_edit_message(status_message, 'מתחיל להוריד את הפלייליסט... ⏳')
+        try:
+            await playlist_task
+        except asyncio.CancelledError:
+            await safe_edit_message(status_message, 'הורדת הפלייליסט בוטלה 🚫')
+            raise
         
-        # אופציות בסיסיות להורדה
-        ydl_opts = {
-            'format': format_spec,
-            'outtmpl': str(DOWNLOADS_DIR / '%(title)s.%(ext)s'),
-            'writethumbnail': True if download_mode == 'video' else False,
-            'postprocessors': [{
-                'key': 'FFmpegThumbnailsConvertor',
-                'format': 'jpg',
-            }] if download_mode == 'video' else [],
-            'extract_flat': True,  # רק מידע בסיסי בהתחלה
-            'quiet': True,
-            'no_warnings': True,
-            'ignoreerrors': True,
-            'socket_timeout': 30,
-            'outtmpl_na_placeholder': 'unknown_title',  # שם ברירת מחדל אם אין כותרת
-        }
-        
-        # קבלת מידע על הפלייליסט
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            logger.info("Extracting playlist info...")
-            result = playlist_info or ydl.extract_info(url, download=False)
-            
-            if not result:
-                raise Exception("Could not extract playlist info")
-            
-            entries = result.get('entries', [])
-            entries = [e for e in entries if e is not None]
-            
-            if not entries:
-                logger.error("No valid entries found in playlist")
-                await safe_edit_message(status_message, 'לא מצאתי סרטונים תקינים בפלייליסט 😕')
-                return
-            
-            total_videos = len(entries)
-            logger.info(f"Found {total_videos} valid videos in playlist")
-            progress_message = await status_message.reply_text(
-                f'מצאתי {total_videos} סרטונים בפלייליסט. מתחיל להוריד... ⏳'
-            )
-            
-            successful_downloads = 0
-            error_videos = 0
-            
-            # הורדת כל סרטון
-            for index, entry in enumerate(entries, 1):
-                current_file = None
-                try:
-                    video_id = entry.get('id') or entry.get('url')
-                    if not video_id:
-                        logger.warning(f"No video ID for entry {index}")
-                        error_videos += 1
-                        continue
-                    
-                    # עדכון הודעת התקדמות
-                    try:
-                        await progress_message.delete()
-                    except Exception:
-                        pass
-                        
-                    current_title = entry.get('title', f'סרטון #{index}')
-                    progress_message = await status_message.reply_text(
-                        f'הורדתי {successful_downloads}/{total_videos} סרטונים מהפלייליסט\n'
-                        f'עכשיו מוריד: {current_title} ⏳'
-                    )
-                    
-                    video_url = f"https://www.youtube.com/watch?v={video_id}"
-                    logger.info(f"Processing video {index}/{total_videos}: {video_url}")
-                    
-                    # הורדת הסרטון
-                    await download_with_quality(
-                        context,
-                        status_message,
-                        video_url,
-                        download_mode,
-                        quality,
-                        None,
-                        is_playlist=True
-                    )
-                    
-                    successful_downloads += 1
-                    logger.info(f"Successfully processed video {index}")
-                
-                except Exception as video_error:
-                    logger.error(f"Error processing video {index}: {str(video_error)}")
-                    error_videos += 1
-            
-            # סיכום
-            try:
-                await progress_message.delete()
-            except Exception:
-                pass
-                
-            summary = f'סיימתי! הורדתי {successful_downloads} מתוך {total_videos} סרטונים מהפלייליסט 🎉'
-            if error_videos > 0:
-                summary += f' ({error_videos} לא זמינים)'
-            logger.info(f"Playlist download completed. Success: {successful_downloads}, Errors: {error_videos}")
-            await status_message.reply_text(summary)
-            
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Critical error during playlist download: {error_msg}")
-        await safe_edit_message(status_message, 'משהו השתבש בהורדת הפלייליסט 😕')
+        if not isinstance(e, asyncio.CancelledError):
+            await safe_edit_message(status_message, 'משהו השתבש בהורדת הפלייליסט 😕')
+    finally:
+        if 'active_download_task' in context.user_data:
+            del context.user_data['active_download_task']
 
+async def _perform_playlist_download(context, status_message, url, download_mode, quality, playlist_info=None):
+    """מבצע את הורדת הפלייליסט בפועל"""
+    format_spec = quality['format']
+    if download_mode == 'audio':
+        format_spec = 'bestaudio[ext=m4a]/best[ext=m4a]/bestaudio'
+    
+    logger.info(f"Starting playlist download for URL: {url}")
+    await safe_edit_message(status_message, 'מתחיל להוריד את הפלייליסט... ⏳')
+    
+    # אופציות בסיסיות להורדה
+    ydl_opts = {
+        'format': format_spec,
+        'outtmpl': str(DOWNLOADS_DIR / '%(title)s.%(ext)s'),
+        'writethumbnail': True if download_mode == 'video' else False,
+        'postprocessors': [{
+            'key': 'FFmpegThumbnailsConvertor',
+            'format': 'jpg',
+        }] if download_mode == 'video' else [],
+        'extract_flat': True,  # רק מידע בסיסי בהתחלה
+        'quiet': True,
+        'no_warnings': True,
+        'ignoreerrors': True,
+        'socket_timeout': 30,
+        'outtmpl_na_placeholder': 'unknown_title',  # שם ברירת מחדל אם אין כותרת
+    }
+    
+    # קבלת מידע על הפלייליסט
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        logger.info("Extracting playlist info...")
+        result = playlist_info or ydl.extract_info(url, download=False)
+        
+        if not result:
+            raise Exception("Could not extract playlist info")
+        
+        entries = result.get('entries', [])
+        entries = [e for e in entries if e is not None]
+        
+        if not entries:
+            logger.error("No valid entries found in playlist")
+            await safe_edit_message(status_message, 'לא מצאתי סרטונים תקינים בפלייליסט 😕')
+            return
+        
+        total_videos = len(entries)
+        logger.info(f"Found {total_videos} valid videos in playlist")
+        progress_message = await status_message.reply_text(
+            f'מצאתי {total_videos} סרטונים בפלייליסט. מתחיל להוריד... ⏳'
+        )
+        
+        successful_downloads = 0
+        error_videos = 0
+        
+        # הורדת כל סרטון
+        for index, entry in enumerate(entries, 1):
+            current_file = None
+            try:
+                video_id = entry.get('id') or entry.get('url')
+                if not video_id:
+                    logger.warning(f"No video ID for entry {index}")
+                    error_videos += 1
+                    continue
+                
+                # עדכון הודעת התקדמות
+                try:
+                    await progress_message.delete()
+                except Exception:
+                    pass
+                        
+                current_title = entry.get('title', f'סרטון #{index}')
+                progress_message = await status_message.reply_text(
+                    f'הורדתי {successful_downloads}/{total_videos} סרטונים מהפלייליסט\n'
+                    f'עכשיו מוריד: {current_title} ⏳'
+                )
+                
+                video_url = f"https://www.youtube.com/watch?v={video_id}"
+                logger.info(f"Processing video {index}/{total_videos}: {video_url}")
+                
+                # הורדת הסרטון
+                await download_with_quality(
+                    context,
+                    status_message,
+                    video_url,
+                    download_mode,
+                    quality,
+                    None,
+                    is_playlist=True
+                )
+                
+                successful_downloads += 1
+                logger.info(f"Successfully processed video {index}")
+            
+            except Exception as video_error:
+                logger.error(f"Error processing video {index}: {str(video_error)}")
+                error_videos += 1
+        
+        # סיכום
+        try:
+            await progress_message.delete()
+        except Exception:
+            pass
+                
+        summary = f'סיימתי! הורדתי {successful_downloads} מתוך {total_videos} סרטונים מהפלייליסט 🎉'
+        if error_videos > 0:
+            summary += f' ({error_videos} לא זמינים)'
+        logger.info(f"Playlist download completed. Success: {successful_downloads}, Errors: {error_videos}")
+        await status_message.reply_text(summary)
+        
 async def download_with_quality(context, status_message, url, download_mode, quality, quality_levels, is_playlist=False):
-    """הורדת קובץ באיכות ספציפית"""
+    """מוריד קובץ בהתאם לאיכות שנבחרה"""
+    try:
+        # יצירת משימה חדשה
+        download_task = asyncio.create_task(
+            _perform_download(context, status_message, url, download_mode, quality, quality_levels, is_playlist)
+        )
+        
+        # שמירת המשימה בקונטקסט
+        context.user_data['active_download_task'] = download_task
+        
+        try:
+            # המתנה להשלמת המשימה
+            await download_task
+        except asyncio.CancelledError:
+            # אם המשימה בוטלה, נעדכן את המשתמש
+            if not is_playlist:
+                await safe_edit_message(status_message, 'ההורדה בוטלה 🚫')
+            # קריאה ל-break_download אם יש YoutubeDL פעיל
+            if 'active_ydl' in context.user_data:
+                context.user_data['active_ydl'].break_download()
+            raise
+            
+    except Exception as e:
+        # טיפול בשגיאות
+        logger.error(f"Error in download_with_quality: {e}")
+        raise
+    finally:
+        # ניקוי המשימה והאובייקט מהקונטקסט
+        if 'active_download_task' in context.user_data:
+            del context.user_data['active_download_task']
+        if 'active_ydl' in context.user_data:
+            del context.user_data['active_ydl']
+
+def progress_hook(d, context):
+    """בודק אם המשימה בוטלה בכל שלב של ההורדה"""
+    task = context.user_data.get('active_download_task')
+    if task and task.cancelled():
+        raise asyncio.CancelledError()
+
+async def _perform_download(context, status_message, url, download_mode, quality, quality_levels, is_playlist=False):
+    """מבצע את ההורדה בפועל"""
     current_file = None
     thumbnail_file = None
     
     try:
+        # בדיקת ביטול לפני תחילת ההורדה
+        task = context.user_data.get('active_download_task')
+        if task and task.cancelled():
+            raise asyncio.CancelledError()
+
         # המרת קישורי X לטוויטר בתחילת התהליך
         if 'x.com' in url:
             url = url.replace('x.com', 'twitter.com')
@@ -256,11 +319,12 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             'socket_timeout': 120,
             'outtmpl': '%(id)s.%(ext)s',
             'outtmpl_na_placeholder': 'unknown_title',
-            'progress_hooks': [],
+            'progress_hooks': [lambda d: progress_hook(d, context)],
+            'before_download_hooks': [lambda d: progress_hook({'status': 'before_download'}, context)],
+            'after_download_hooks': [lambda d: progress_hook({'status': 'after_download'}, context)],
             'outtmpl_func': custom_filename,
             'paths': {'home': str(DOWNLOADS_DIR)},
             'writesubtitles': False,
-            'writethumbnail': True if download_mode == 'video' else False,
             'outtmpl_thumbnail': '%(id)s.%(ext)s',
             'extractor_retries': 10,
             'retries': 10,
@@ -418,6 +482,8 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             )
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # שמירת אובייקט ה-YoutubeDL בקונטקסט
+            context.user_data['active_ydl'] = ydl
             try:
                 # ניסיון ראשון - הורדה ישירה
                 info = ydl.extract_info(url, download=True)

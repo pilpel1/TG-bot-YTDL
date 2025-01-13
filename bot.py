@@ -3,7 +3,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 from telegram.error import NetworkError, TimedOut
 from logger_setup import logger
 from config import BOT_TOKEN
-from bot_handlers import start, ask_format, button_click, handle_thank_you, version
+from bot_handlers import start, ask_format, button_click, handle_thank_you, version, help_command, cancel
 
 async def error_handler(update: Update, context):
     """טיפול בשגיאות של הבוט"""
@@ -42,7 +42,9 @@ def main():
         
         # Add handlers
         application.add_handler(CommandHandler('start', start))
+        application.add_handler(CommandHandler('help', help_command))
         application.add_handler(CommandHandler('version', version))
+        application.add_handler(CommandHandler('cancel', cancel))
         
         # תפיסת כל סוגי ההודעות חוץ מפקודות
         application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, ask_format))
