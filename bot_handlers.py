@@ -2,7 +2,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from logger_setup import logger
 from config import YOUTUBE_QUALITY_LEVELS, DEFAULT_FORMAT, VERSION, CHANGELOG
-from download_manager import download_with_quality
+from download_manager import download_with_quality, cancel_download
 import random
 import re
 
@@ -106,7 +106,8 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [
                 InlineKeyboardButton("אודיו 🎵", callback_data='audio'),
                 InlineKeyboardButton("וידאו 🎥", callback_data='video')
-            ]
+            ],
+            [InlineKeyboardButton("ביטול ❌", callback_data='cancel')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await message.reply_text('מה תרצה להוריד?', reply_markup=reply_markup)
@@ -134,12 +135,24 @@ async def ask_quality(message, download_mode):
             )
         ])
     
+    # הוספת כפתור ביטול
+    keyboard.append([InlineKeyboardButton("ביטול ❌", callback_data='cancel')])
+    
     reply_markup = InlineKeyboardMarkup(keyboard)
     await message.edit_text('באיזו איכות להוריד את הוידאו?', reply_markup=reply_markup)
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    
+    if query.data == 'cancel':
+        # טיפול בביטול
+        download_id = context.user_data.get('current_download_id')
+        if download_id:
+            cancel_download(download_id)
+            context.user_data.pop('current_download_id', None)
+        await query.message.edit_text('הפעולה בוטלה ❌')
+        return
     
     if query.data.startswith('quality_'):
         # טיפול בבחירת איכות
@@ -153,6 +166,12 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         context.user_data['current_quality_index'] = quality_index
         status_message = await query.message.edit_text('מתחיל בהורדה... ⏳')
+        
+        # הוספת כפתור ביטול להודעת הסטטוס
+        cancel_button = InlineKeyboardMarkup([[
+            InlineKeyboardButton("ביטול הורדה ❌", callback_data='cancel')
+        ]])
+        await status_message.edit_reply_markup(reply_markup=cancel_button)
         
         await download_with_quality(
             context,
@@ -172,6 +191,13 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if download_mode == 'audio' or not is_youtube:
             # עבור אודיו או לא-יוטיוב - מתחילים הורדה מיד באיכות הטובה ביותר
             status_message = await query.message.edit_text('מתחיל בהורדה... ⏳')
+            
+            # הוספת כפתור ביטול להודעת הסטטוס
+            cancel_button = InlineKeyboardMarkup([[
+                InlineKeyboardButton("ביטול הורדה ❌", callback_data='cancel')
+            ]])
+            await status_message.edit_reply_markup(reply_markup=cancel_button)
+            
             quality = DEFAULT_FORMAT if not is_youtube else YOUTUBE_QUALITY_LEVELS[1]
             await download_with_quality(
                 context,

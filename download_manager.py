@@ -1,6 +1,7 @@
 import os
 import yt_dlp
 import telegram
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from pathlib import Path
 from logger_setup import logger, log_download
 from config import DOWNLOADS_DIR, MAX_FILE_SIZE
@@ -9,6 +10,31 @@ import re
 import uuid
 import subprocess
 import requests
+from typing import Dict, Optional
+
+# מעקב אחר הורדות פעילות
+active_downloads: Dict[str, bool] = {}
+
+def generate_download_id() -> str:
+    """יוצר מזהה ייחודי להורדה"""
+    return str(uuid.uuid4())
+
+def cancel_download(download_id: str) -> bool:
+    """מבטל הורדה פעילה"""
+    if download_id in active_downloads:
+        active_downloads[download_id] = False
+        return True
+    return False
+
+class DownloadCancelled(Exception):
+    """חריגה שמציינת שההורדה בוטלה"""
+    pass
+
+def progress_hook(d):
+    """Hook שמטפל בהתקדמות ההורדה ובודק אם היא בוטלה"""
+    download_id = d.get('ctx_id')
+    if download_id and not active_downloads.get(download_id, True):
+        raise DownloadCancelled("ההורדה בוטלה על ידי המשתמש")
 
 def clean_filename(filename):
     """מנקה שם קובץ מתווים לא חוקיים ומקצר אותו אם צריך"""
@@ -33,20 +59,32 @@ def clean_filename(filename):
     
     return filename
 
-async def safe_edit_message(message, text):
+async def safe_edit_message(message, text, add_cancel_button=True):
     """עדכון הודעה עם טיפול בשגיאות"""
     try:
-        await message.edit_text(text)
+        if add_cancel_button:
+            cancel_button = InlineKeyboardMarkup([[
+                InlineKeyboardButton("ביטול הורדה ❌", callback_data='cancel')
+            ]])
+            await message.edit_text(text, reply_markup=cancel_button)
+        else:
+            await message.edit_text(text)
     except telegram.error.BadRequest as e:
         if "Message is not modified" in str(e):
             pass
         else:
             raise
 
-async def safe_send_message(message, text):
+async def safe_send_message(message, text, add_cancel_button=True):
     """שליחת הודעה עם טיפול בשגיאות"""
     try:
-        await message.reply_text(text)
+        if add_cancel_button:
+            cancel_button = InlineKeyboardMarkup([[
+                InlineKeyboardButton("ביטול הורדה ❌", callback_data='cancel')
+            ]])
+            await message.reply_text(text, reply_markup=cancel_button)
+        else:
+            await message.reply_text(text)
     except Exception as e:
         logger.error(f"Error sending message: {str(e)}")
 
@@ -106,7 +144,14 @@ async def download_playlist(context, status_message, url, download_mode, quality
             
             total_videos = len(entries)
             logger.info(f"Found {total_videos} valid videos in playlist")
-            progress_message = await status_message.reply_text(
+            
+            # יצירת כפתור ביטול
+            cancel_button = InlineKeyboardMarkup([[
+                InlineKeyboardButton("ביטול הורדה ❌", callback_data='cancel')
+            ]])
+            
+            progress_message = await safe_send_message(
+                status_message,
                 f'מצאתי {total_videos} סרטונים בפלייליסט. מתחיל להוריד... ⏳'
             )
             
@@ -130,7 +175,8 @@ async def download_playlist(context, status_message, url, download_mode, quality
                         pass
                         
                     current_title = entry.get('title', f'סרטון #{index}')
-                    progress_message = await status_message.reply_text(
+                    progress_message = await safe_send_message(
+                        status_message,
                         f'הורדתי {successful_downloads}/{total_videos} סרטונים מהפלייליסט\n'
                         f'עכשיו מוריד: {current_title} ⏳'
                     )
@@ -177,7 +223,12 @@ async def download_with_quality(context, status_message, url, download_mode, qua
     """הורדת קובץ באיכות ספציפית"""
     current_file = None
     thumbnail_file = None
+    download_id = generate_download_id()
+    active_downloads[download_id] = True
     
+    # שומר את מזהה ההורדה ב-context
+    context.user_data['current_download_id'] = download_id
+
     try:
         # המרת קישורי X לטוויטר בתחילת התהליך
         if 'x.com' in url:
@@ -191,7 +242,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     info = ydl.extract_info(url, download=False)
                     # בדיקת תוכן מוגבל
                     if info.get('age_limit', 0) > 0 or info.get('content_warning'):
-                        await safe_edit_message(status_message, 'הסרטון מוגבל לצפייה, לא ניתן להוריד ⛔')
+                        await safe_edit_message(status_message, 'הסרטון מוגבל לצפייה, לא ניתן להוריד ⛔', add_cancel_button=False)
                         raise Exception("Sign in to confirm your age")
                     # בדיקת פלייליסט
                     if 'entries' in info:
@@ -199,7 +250,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                         return
             except Exception as e:
                 if "Sign in to confirm your age" in str(e):
-                    await safe_edit_message(status_message, 'הסרטון מוגבל לצפייה, לא ניתן להוריד ⛔')
+                    await safe_edit_message(status_message, 'הסרטון מוגבל לצפייה, לא ניתן להוריד ⛔', add_cancel_button=False)
                     raise
                 logger.error(f"Error in pre-check: {str(e)}")
 
@@ -256,27 +307,26 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             'socket_timeout': 120,
             'outtmpl': '%(id)s.%(ext)s',
             'outtmpl_na_placeholder': 'unknown_title',
-            'progress_hooks': [],
+            'progress_hooks': [progress_hook],
             'outtmpl_func': custom_filename,
             'paths': {'home': str(DOWNLOADS_DIR)},
             'writesubtitles': False,
             'writethumbnail': True if download_mode == 'video' else False,
             'outtmpl_thumbnail': '%(id)s.%(ext)s',
-            'extractor_retries': 10,
-            'retries': 10,
-            'fragment_retries': 10,
+            'extractor_retries': 3,
+            'retries': 3,
+            'fragment_retries': 3,
             'skip_download': False,
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1'
-            }
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-us,en;q=0.5',
+                'Sec-Fetch-Mode': 'navigate'
+            },
+            'ctx_id': download_id  # מעביר את מזהה ההורדה ל-progress hook
         }
 
         # הגדרות ספציפיות לפלטפורמות
@@ -507,7 +557,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     
                     if not is_playlist:
                         quality_msg = f" ({quality['quality_name']})" if quality['quality_name'] != 'איכות רגילה' else ""
-                        await safe_send_message(status_message, f'הנה הקובץ שלך!{quality_msg} 🎉')
+                        await safe_send_message(status_message, f'הנה הקובץ שלך!{quality_msg} 🎉', add_cancel_button=False)
                         context.user_data.pop('current_quality_index', None)
                     
                     logger.info("File sent successfully")
@@ -515,7 +565,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 except telegram.error.TimedOut as e:
                     logger.error(f"Timeout during file send: {str(e)}")
                     if not is_playlist:
-                        await safe_edit_message(status_message, 'שליחת הקובץ נכשלה עקב זמן ממושך מדי. נסה שוב או בחר באיכות נמוכה יותר.')
+                        await safe_edit_message(status_message, 'שליחת הקובץ נכשלה עקב זמן ממושך מדי. נסה שוב או בחר באיכות נמוכה יותר.', add_cancel_button=False)
                     raise
                 
                 except Exception as e:
@@ -526,22 +576,27 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 if not is_playlist:
                     await safe_edit_message(
                         status_message,
-                        f'הקובץ גדול מדי ({size_mb:.1f}MB). נסה באיכות נמוכה יותר או סרטון קצר יותר.'
+                        f'הקובץ גדול מדי ({size_mb:.1f}MB). נסה באיכות נמוכה יותר או סרטון קצר יותר.',
+                        add_cancel_button=False
                     )
                 return False
     
+    except DownloadCancelled:
+        if not is_playlist:
+            await safe_edit_message(status_message, 'ההורדה בוטלה 🚫', add_cancel_button=False)
+        return False
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error during download: {error_msg}")
         
         if not is_playlist:
             if "Sign in to confirm your age" in error_msg:
-                await safe_edit_message(status_message, 'הסרטון מוגבל לצפייה, לא ניתן להוריד ⛔')
+                await safe_edit_message(status_message, 'הסרטון מוגבל לצפייה, לא ניתן להוריד ⛔', add_cancel_button=False)
                 raise  # מעביר את השגיאה ל-error_handler
             elif "Video unavailable" in error_msg:
-                await safe_edit_message(status_message, 'הסרטון לא זמין 😕')
+                await safe_edit_message(status_message, 'הסרטון לא זמין 😕', add_cancel_button=False)
             else:
-                await safe_edit_message(status_message, 'משהו השתבש בהורדה 😕')
+                await safe_edit_message(status_message, 'משהו השתבש בהורדה 😕', add_cancel_button=False)
         raise  # מעביר את השגיאה הלאה
     
     finally:
@@ -557,6 +612,10 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 thumbnail_file.unlink()
             except Exception as e:
                 logger.error(f"Error deleting thumbnail {thumbnail_file}: {e}")
+        
+        # מנקה את מזהה ההורדה מה-context
+        context.user_data.pop('current_download_id', None)
+        active_downloads.pop(download_id, None)  # מסיר את ההורדה מהמעקב
 
 def resolve_tiktok_url(url):
     """מקבל קישור מקוצר של טיקטוק ומחזיר את הקישור המלא"""
