@@ -367,15 +367,6 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 'ignore_no_formats_error': True
             })
         elif 'facebook.com' in url or 'fb.watch' in url:
-            # הודעה זמנית על חוסר תמיכה
-            logger.info("Facebook download attempted - currently unsupported")
-            if not is_playlist:
-                await safe_edit_message(
-                    status_message,
-                    'הורדה מפייסבוק לא זמינה כרגע עקב שינויים במערכת של פייסבוק. אנחנו עובדים על פתרון 🔧'
-                )
-            return False
-
             # ניקוי והמרת הקישור
             if 'share/v/' in url:
                 video_id = url.split('/v/')[-1].split('/')[0]
@@ -399,15 +390,6 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     'Sec-Fetch-Dest': 'empty',
                     'Sec-Fetch-Mode': 'cors',
                     'Sec-Fetch-Site': 'same-origin'
-                },
-                'socket_timeout': 30,
-                'extractor_args': {
-                    'facebook': {
-                        'access_token': [''],
-                        'ap': ['true'],
-                        'download_api': ['true'],
-                        'format': ['dash,progressive']
-                    }
                 }
             })
 
