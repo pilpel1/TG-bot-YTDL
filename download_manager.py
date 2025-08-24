@@ -4,6 +4,7 @@ import telegram
 from pathlib import Path
 from logger_setup import logger, log_download
 from config import DOWNLOADS_DIR, MAX_FILE_SIZE
+from utils import send_video_with_long_caption
 import asyncio
 import re
 import uuid
@@ -465,9 +466,10 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                 except Exception as e:
                                     logger.error(f"Error reading thumbnail: {e}")
                                 
-                            await status_message.reply_video(
+                            await send_video_with_long_caption(
+                                status_message,
                                 f,
-                                caption=f"{info.get('title', '')}\n\n{info.get('description', '')}" if (info.get('title') or info.get('description')) else f"Video by {info.get('uploader', 'Unknown')}",
+                                info,
                                 duration=info.get('duration'),
                                 width=info.get('width', 0),
                                 height=info.get('height', 0),
