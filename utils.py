@@ -3,8 +3,8 @@ import asyncio
 import telegram
 from logger_setup import logger
 
-# Maximum caption length for Telegram (4096 characters)
-MAX_CAPTION_LENGTH = 4096
+# Maximum caption length for Telegram (1024 characters)
+MAX_CAPTION_LENGTH = 1024
 
 def sanitize_filename(filename):
     """Clean filename from special characters"""
@@ -43,7 +43,7 @@ def split_long_text(text, max_length=MAX_CAPTION_LENGTH):
     
     Args:
         text (str): הטקסט המקורי
-        max_length (int): האורך המקסימלי לכל חלק (ברירת מחדל: 4096)
+        max_length (int): האורך המקסימלי לכל חלק (ברירת מחדל: 1024)
     
     Returns:
         list: רשימת חלקי הטקסט
@@ -51,64 +51,37 @@ def split_long_text(text, max_length=MAX_CAPTION_LENGTH):
     if not text or len(text) <= max_length:
         return [text] if text else []
     
-    # ניסיון לחתוך על פי פסקאות (שורות ריקות)
-    paragraphs = text.split('\n\n')
     chunks = []
-    current_chunk = ""
+    start = 0
     
-    for paragraph in paragraphs:
-        # אם הפסקה בעצמה ארוכה מדי, נחתוך אותה
-        if len(paragraph) > max_length:
-            # אם יש חלק נוכחי, נוסיף אותו קודם
-            if current_chunk:
-                chunks.append(current_chunk.strip())
-                current_chunk = ""
-            
-            # נחתוך את הפסקה הארוכה לפי משפטים
-            sentences = paragraph.split('. ')
-            for i, sentence in enumerate(sentences):
-                sentence_to_add = sentence + ('. ' if i < len(sentences) - 1 else '')
-                
-                # אם המשפט בעצמו ארוך מדי, נחתוך בכוח
-                if len(sentence_to_add) > max_length:
-                    if current_chunk:
-                        chunks.append(current_chunk.strip())
-                        current_chunk = ""
-                    
-                    # חתך בכוח לפי אורך
-                    while len(sentence_to_add) > max_length:
-                        chunks.append(sentence_to_add[:max_length].strip())
-                        sentence_to_add = sentence_to_add[max_length:]
-                    
-                    if sentence_to_add:
-                        current_chunk = sentence_to_add
-                
-                # בדיקה אם אפשר להוסיף למשפט הנוכחי
-                elif len(current_chunk) + len(sentence_to_add) <= max_length:
-                    current_chunk += sentence_to_add
-                else:
-                    # הוספת החלק הנוכחי והתחלת חדש
-                    if current_chunk:
-                        chunks.append(current_chunk.strip())
-                    current_chunk = sentence_to_add
+    while start < len(text):
+        end = start + max_length
         
-        # פסקה רגילה
-        elif len(current_chunk) + len(paragraph) + 2 <= max_length:  # +2 for \n\n
-            if current_chunk:
-                current_chunk += '\n\n' + paragraph
-            else:
-                current_chunk = paragraph
+        # אם זה החלק האחרון
+        if end >= len(text):
+            chunks.append(text[start:].strip())
+            break
+        
+        # חיפוש פסקה חדשה בין תו 900 ל-1023
+        search_start = start + 900 if start + 900 < end else start
+        newline_pos = text.rfind('\n', search_start, end - 1)  # -1 כדי לא לחרוג מ-1023
+        
+        if newline_pos > search_start:
+            # מצאנו פסקה חדשה - נחתוך שם
+            chunks.append(text[start:newline_pos].strip())
+            start = newline_pos + 1
         else:
-            # הפסקה לא נכנסת, נוסיף את החלק הנוכחי ונתחיל חדש
-            if current_chunk:
-                chunks.append(current_chunk.strip())
-            current_chunk = paragraph
+            # אין פסקה חדשה - חיפוש רווח
+            space_pos = text.rfind(' ', search_start, end - 1)  # -1 כדי לא לחרוג מ-1023
+            if space_pos > search_start:
+                chunks.append(text[start:space_pos].strip())
+                start = space_pos + 1
+            else:
+                # חיתוך קשיח ב-1023 כדי לא לחרוג
+                chunks.append(text[start:start + 1023].strip())
+                start = start + 1023
     
-    # הוספת החלק האחרון
-    if current_chunk:
-        chunks.append(current_chunk.strip())
-    
-    return chunks
+    return [chunk for chunk in chunks if chunk]
 
 async def send_video_with_long_caption(message, video_file, video_info, **kwargs):
     """
@@ -139,8 +112,13 @@ async def send_video_with_long_caption(message, video_file, video_info, **kwargs
     if not text_chunks:
         text_chunks = [f"Video by {uploader}"]
     
-    # שליחת הסרטון עם החלק הראשון
-    first_caption = text_chunks[0] if text_chunks else ""
+    # שליחת הסרטון עם החלק הראשון - בכל מקרה לא יותר מ-1024
+    if text_chunks:
+        first_caption = text_chunks[0]
+        if len(first_caption) > 1020:  # מעט מקום לבטיחות
+            first_caption = first_caption[:1020]
+    else:
+        first_caption = f"Video by {uploader}"
     
     # הסרת caption מ-kwargs כדי להימנע מכפילות
     kwargs.pop('caption', None)
