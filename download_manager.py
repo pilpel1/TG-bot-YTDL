@@ -67,7 +67,7 @@ async def download_playlist(context, status_message, url, download_mode, quality
     try:
         format_spec = quality['format']
         if download_mode == 'audio':
-            format_spec = 'bestaudio[ext=m4a]/best[ext=m4a]/bestaudio'
+            format_spec = 'bestaudio[ext=m4a]/bestaudio[ext=aac]/bestaudio[ext=mp3]'
         
         logger.info(f"Starting playlist download for URL: {url}")
         await safe_edit_message(status_message, 'מתחיל להוריד את הפלייליסט... ⏳')
@@ -207,7 +207,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         # הגדרות בסיסיות עבור yt-dlp
         format_spec = quality['format']
         if download_mode == 'audio':
-            format_spec = 'bestaudio[ext=m4a]/best[ext=m4a]/bestaudio'
+            format_spec = 'bestaudio[ext=m4a]/bestaudio[ext=aac]/bestaudio[ext=mp3]'
             
         # פונקציה שמנקה את שם הקובץ לפני היצירה
         def custom_filename(info_dict, *, prefix=''):
@@ -279,7 +279,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 'Upgrade-Insecure-Requests': '1'
             }
         }
-
+        
         # הגדרות ספציפיות לפלטפורמות
         if 'tiktok.com' in url:
             # המרת קישור מקוצר לקישור מלא
@@ -393,6 +393,12 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     'Sec-Fetch-Site': 'same-origin'
                 }
             })
+
+            # הוספת קוקיז אם הקובץ קיים
+            cookies_file = Path('facebook_cookies.txt')
+            if cookies_file.exists():
+                ydl_opts['cookiefile'] = str(cookies_file)
+                logger.info("Using facebook_cookies.txt for download.")
 
         if not is_playlist:
             await safe_edit_message(
