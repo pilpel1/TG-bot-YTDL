@@ -2,9 +2,47 @@ import re
 import asyncio
 import telegram
 from logger_setup import logger
+from config import DOWNLOADS_DIR
 
 # Maximum caption length for Telegram (1024 characters)
 MAX_CAPTION_LENGTH = 1024
+
+def cleanup_temp_files():
+    """מנקה קבצים זמניים שנשארו מהורדות קודמות"""
+    try:
+        temp_files_count = 0
+        
+        # מוחק קבצי .part
+        for file_path in DOWNLOADS_DIR.glob("*.part*"):
+            try:
+                file_path.unlink()
+                temp_files_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to delete {file_path}: {e}")
+        
+        # מוחק קבצי .ytdl
+        for file_path in DOWNLOADS_DIR.glob("*.ytdl"):
+            try:
+                file_path.unlink()
+                temp_files_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to delete {file_path}: {e}")
+        
+        # מוחק קבצי thumbnail זמניים (webp שנותרו)
+        for file_path in DOWNLOADS_DIR.glob("*.webp"):
+            try:
+                file_path.unlink()
+                temp_files_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to delete {file_path}: {e}")
+        
+        if temp_files_count > 0:
+            logger.info(f"Cleaned up {temp_files_count} temporary files from downloads directory")
+        else:
+            logger.info("No temporary files found to clean up")
+            
+    except Exception as e:
+        logger.error(f"Error during cleanup: {e}")
 
 def sanitize_filename(filename):
     """Clean filename from special characters"""

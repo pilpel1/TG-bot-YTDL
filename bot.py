@@ -4,6 +4,7 @@ from telegram.error import NetworkError, TimedOut
 from logger_setup import logger
 from config import BOT_TOKEN
 from bot_handlers import start, ask_format, button_click, handle_thank_you, version
+from utils import cleanup_temp_files
 
 async def error_handler(update: Update, context):
     """טיפול בשגיאות של הבוט"""
@@ -34,6 +35,9 @@ async def error_handler(update: Update, context):
 
 def main():
     try:
+        # ניקוי קבצים זמניים מהפעלה קודמת
+        cleanup_temp_files()
+        
         # Initialize the bot with custom settings
         application = (ApplicationBuilder()
                       .token(BOT_TOKEN)
