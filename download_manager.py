@@ -516,7 +516,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 if not is_playlist:
                     await safe_edit_message(
                         status_message,
-                        f'הקובץ גדול מדי ({size_mb:.1f}MB). נסה באיכות נמוכה יותר או סרטון קצר יותר.'
+                        f'הקובץ גדול מדי ({size_mb:.1f}MB). מגבלה מקסימלית: 2GB. נסה באיכות נמוכה יותר.'
                     )
                 return False
     
