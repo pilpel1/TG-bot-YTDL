@@ -38,11 +38,13 @@ def main():
         # ניקוי קבצים זמניים מהפעלה קודמת
         cleanup_temp_files()
         
-        # Initialize the bot with custom settings (using local API server)
+        # Initialize the bot with custom settings
+        # For 2GB file support: uncomment the next 2 lines and run Local Bot API Server
+        # For 50MB limit: comment out the next 2 lines to use standard Telegram API
         application = (ApplicationBuilder()
                       .token(BOT_TOKEN)
-                      .base_url("http://localhost:8081/bot")
-                      .base_file_url("http://localhost:8081/file/bot")
+                      .base_url("http://localhost:8081/bot")        # Comment this for 50MB mode
+                      .base_file_url("http://localhost:8081/file/bot")  # Comment this for 50MB mode
                       .get_updates_pool_timeout(30)
                       .get_updates_connection_pool_size(1)
                       .get_updates_connect_timeout(60)

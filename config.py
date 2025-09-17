@@ -17,8 +17,9 @@ LOGS_DIR = Path('logs')
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
-# Download settings
-MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB in bytes
+# Download settings - choose based on your setup:
+# MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB - for standard Telegram Bot API
+MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB - for Local Bot API Server mode
 
 # Quality levels for YouTube videos
 YOUTUBE_QUALITY_LEVELS = [
@@ -43,8 +44,10 @@ DEFAULT_FORMAT = {
 }
 
 # Version info
-VERSION = "0.4.6"
-CHANGELOG = """🆕 גרסה 0.4.6:
-• תמיכה בסרטונים מוגבלים - הבוט יודיע כשסרטון לא זמין
-• שיפור הטיפול בפלייליסטים
-• תיקוני באגים ושיפורי יציבות""" 
+VERSION = "0.5.0"
+CHANGELOG = """🆕 גרסה 0.5.0:
+🚀 תמיכה בקבצים גדולים עד 2GB! (דרך Local Bot API Server)
+• אפשרות לשליחת קבצים גדולים עד 2GB במקום 50MB
+• הוראות התקנה לשני מצבים: פשוט (50MB) ומתקדם (2GB)
+• תמיכה מלאה ב-WSL2 ו-Docker לשרת מקומי
+• שיפור הוראות ההתקנה והתיעוד""" 
