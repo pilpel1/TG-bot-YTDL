@@ -18,7 +18,7 @@ DOWNLOADS_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
 # Download settings
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB in bytes
+MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB in bytes
 
 # Quality levels for YouTube videos
 YOUTUBE_QUALITY_LEVELS = [

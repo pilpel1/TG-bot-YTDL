@@ -38,10 +38,15 @@ def main():
         # ניקוי קבצים זמניים מהפעלה קודמת
         cleanup_temp_files()
         
-        # Initialize the bot with custom settings
+        # Initialize the bot with custom settings (using local API server)
         application = (ApplicationBuilder()
                       .token(BOT_TOKEN)
+                      .base_url("http://localhost:8081/bot")
+                      .base_file_url("http://localhost:8081/file/bot")
                       .get_updates_pool_timeout(30)
+                      .get_updates_connection_pool_size(1)
+                      .get_updates_connect_timeout(60)
+                      .get_updates_read_timeout(60)
                       .build())
         
         # Add handlers
