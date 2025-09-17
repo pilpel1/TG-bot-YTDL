@@ -2,10 +2,9 @@
 echo Starting Telegram Local Bot API Server...
 echo.
 
-REM Load environment variables from .env file
-for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
-    if not "%%A"=="" if not "%%A:~0,1%"=="#" set %%A=%%B
-)
+REM TODO: Replace with your actual API credentials from .env
+set TELEGRAM_API_ID=your_new_api_id_here
+set TELEGRAM_API_HASH=your_new_api_hash_here
 
 REM Stop and remove existing container if it exists
 wsl docker rm -f telegram-bot-api 2>nul
