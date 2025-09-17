@@ -2,11 +2,16 @@
 echo Starting Telegram Local Bot API Server...
 echo.
 
+REM Load environment variables from .env file
+for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
+    if not "%%A"=="" if not "%%A:~0,1%"=="#" set %%A=%%B
+)
+
 REM Stop and remove existing container if it exists
 wsl docker rm -f telegram-bot-api 2>nul
 
 REM Start new container with your API credentials in WSL2
-wsl docker run -d --name telegram-bot-api -p 0.0.0.0:8081:8081 -e TELEGRAM_API_ID=13118303 -e TELEGRAM_API_HASH=d2d9211973b209be7532b8539716b2c4 aiogram/telegram-bot-api:latest --local
+wsl docker run -d --name telegram-bot-api -p 0.0.0.0:8081:8081 -e TELEGRAM_API_ID=%TELEGRAM_API_ID% -e TELEGRAM_API_HASH=%TELEGRAM_API_HASH% aiogram/telegram-bot-api:latest --local
 
 if %errorlevel% equ 0 (
     echo.
