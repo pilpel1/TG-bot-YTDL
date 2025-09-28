@@ -17,9 +17,19 @@ LOGS_DIR = Path('logs')
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
-# Download settings - choose based on your setup:
-# MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB - for standard Telegram Bot API
-MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB - for Local Bot API Server mode
+# Download settings - auto-detect based on Local API Server availability
+try:
+    import requests
+    response = requests.get("http://localhost:8081", timeout=2)
+    if response.status_code == 200:
+        MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB - for Local Bot API Server mode
+        print("Local API Server detected - 2GB file limit enabled")
+    else:
+        MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB - for standard Telegram Bot API
+        print("Using standard Telegram API - 50MB file limit")
+except:
+    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB - for standard Telegram Bot API
+    print("Local API Server not available - using 50MB file limit")
 
 # Quality levels for YouTube videos
 YOUTUBE_QUALITY_LEVELS = [

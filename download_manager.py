@@ -271,17 +271,40 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             'no_warnings': True,
             'extract_flat': False,
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
                 'Accept-Language': 'en-US,en;q=0.9',
                 'Accept-Encoding': 'gzip, deflate, br',
                 'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1'
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1'
             }
         }
         
         # הגדרות ספציפיות לפלטפורמות
-        if 'tiktok.com' in url:
+        if 'youtube.com' in url or 'youtu.be' in url:
+            # הגדרות מיוחדות ל-YouTube כדי לטפל בבעיות nsig החדשות
+            ydl_opts.update({
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android', 'web'],
+                        'player_skip': ['configs'],
+                        'skip': ['hls', 'dash']
+                    }
+                },
+                'format': 'best[height<=1080][ext=mp4]/best[height<=720][ext=mp4]/best[ext=mp4]/best',
+                'prefer_free_formats': True,
+                'http_headers': {
+                    **ydl_opts['http_headers'],
+                    'User-Agent': 'com.google.android.youtube/17.31.35 (Linux; U; Android 11) gzip',
+                    'X-YouTube-Client-Name': '3',
+                    'X-YouTube-Client-Version': '17.31.35'
+                }
+            })
+        elif 'tiktok.com' in url:
             # המרת קישור מקוצר לקישור מלא
             if 'vt.tiktok.com' in url:
                 logger.info("Converting shortened TikTok URL...")
@@ -411,21 +434,50 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 # ניסיון ראשון - הורדה ישירה
                 info = ydl.extract_info(url, download=True)
             except yt_dlp.utils.DownloadError as e:
-                if "Failed to parse XML" in str(e) or "Requested format is not available" in str(e):
+                error_str = str(e)
+                if any(keyword in error_str for keyword in [
+                    "Failed to parse XML", 
+                    "Requested format is not available",
+                    "nsig extraction failed",
+                    "Some formats may be missing",
+                    "Only images are available"
+                ]):
                     logger.info("Retrying with different format selection...")
                     
-                    # מנסה להוריד עם הגדרות מותאמות
-                    ydl_opts.update({
-                        'format': 'best[protocol=https]/best[protocol=http]/best',
-                        'prefer_free_formats': True,
-                        'no_check_formats': True
-                    })
+                    # מנסה עם פורמטים פשוטים יותר - ללא מרוכבים
+                    fallback_formats = [
+                        'best[height<=720]/best',
+                        'worst[height>=360]/worst',
+                        'mp4/best',
+                        'best[ext=mp4]/best',
+                        'best[protocol=https]/best[protocol=http]/best'
+                    ]
                     
-                    try:
-                        info = ydl.extract_info(url, download=True)
-                    except Exception as retry_error:
-                        logger.error(f"Error during retry: {str(retry_error)}")
-                        raise
+                    for fallback_format in fallback_formats:
+                        try:
+                            logger.info(f"Trying format: {fallback_format}")
+                            ydl_opts_retry = ydl_opts.copy()
+                            ydl_opts_retry.update({
+                                'format': fallback_format,
+                                'prefer_free_formats': True,
+                                'no_check_formats': True,
+                                'ignore_no_formats_error': True,
+                                'extract_flat': False
+                            })
+                            
+                            with yt_dlp.YoutubeDL(ydl_opts_retry) as ydl_retry:
+                                info = ydl_retry.extract_info(url, download=True)
+                                if info:
+                                    logger.info(f"Success with format: {fallback_format}")
+                                    break
+                                    
+                        except Exception as retry_error:
+                            logger.warning(f"Format {fallback_format} failed: {str(retry_error)}")
+                            continue
+                    
+                    if not info:
+                        logger.error(f"All fallback formats failed for: {url}")
+                        raise Exception("All download formats failed")
                 else:
                     raise
 

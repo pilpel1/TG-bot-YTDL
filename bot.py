@@ -41,15 +41,37 @@ def main():
         # Initialize the bot with custom settings
         # For 2GB file support: uncomment the next 2 lines and run Local Bot API Server
         # For 50MB limit: comment out the next 2 lines to use standard Telegram API
-        application = (ApplicationBuilder()
-                      .token(BOT_TOKEN)
-                      .base_url("http://localhost:8081/bot")        # Comment this for 50MB mode
-                      .base_file_url("http://localhost:8081/file/bot")  # Comment this for 50MB mode
-                      .get_updates_pool_timeout(30)
-                      .get_updates_connection_pool_size(1)
-                      .get_updates_connect_timeout(60)
-                      .get_updates_read_timeout(60)
-                      .build())
+        
+        # בדיקה אם Local API Server זמין
+        try:
+            import requests
+            response = requests.get("http://localhost:8081", timeout=2)
+            local_api_available = response.status_code == 200
+            logger.info("Local API Server detected - using 2GB mode")
+        except:
+            local_api_available = False
+            logger.info("Local API Server not available - using standard 50MB mode")
+        
+        if local_api_available:
+            # מצב 2GB עם Local API Server
+            application = (ApplicationBuilder()
+                          .token(BOT_TOKEN)
+                          .base_url("http://localhost:8081/bot")
+                          .base_file_url("http://localhost:8081/file/bot")
+                          .get_updates_pool_timeout(30)
+                          .get_updates_connection_pool_size(1)
+                          .get_updates_connect_timeout(60)
+                          .get_updates_read_timeout(60)
+                          .build())
+        else:
+            # מצב רגיל 50MB
+            application = (ApplicationBuilder()
+                          .token(BOT_TOKEN)
+                          .get_updates_pool_timeout(30)
+                          .get_updates_connection_pool_size(1)
+                          .get_updates_connect_timeout(60)
+                          .get_updates_read_timeout(60)
+                          .build())
         
         # Add handlers
         application.add_handler(CommandHandler('start', start))
