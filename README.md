@@ -109,28 +109,19 @@ sudo apt install ffmpeg
 
 ## 🎯 שימוש
 
-יש שתי דרכים להפעיל את הבוט:
+### 🤖 זיהוי אוטומטי חכם
+
+**החל מגרסה 0.5.1**, הבוט מזהה אוטומטית איזה מצב להשתמש:
+- 🔍 **זיהוי אוטומטי**: הבוט בודק אם Local API Server זמין
+- 🚀 **מצב 2GB**: אם השרת זמין - מגבלה של 2GB
+- 📱 **מצב 50MB**: אם השרת לא זמין - מגבלה רגילה של 50MB
+
+**אין צורך לשנות קוד ידנית!** הבוט יבחר את המצב המתאים אוטומטית.
 
 ### 🔸 הפעלה פשוטה (מגבלה 50MB)
 
 להפעלה מהירה עם Telegram Bot API הרגיל:
 
-1. **שנה בקוד** שני קבצים:
-
-**ב-`bot.py`** - הערה את ה-base_url:
-```python
-# הערה או מחק את השורות האלה:
-# .base_url("http://localhost:8081/bot")
-# .base_file_url("http://localhost:8081/file/bot")
-```
-
-**ב-`config.py`** - ודא שהמגבלה מוגדרת ל-50MB:
-```python
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB - for standard Telegram Bot API
-# MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB - for Local Bot API Server mode
-```
-
-2. **הפעל את הבוט**:
 ```bash
 # בWindows
 .\venv\Scripts\activate
@@ -141,19 +132,15 @@ source venv/bin/activate
 python bot.py
 ```
 
+הבוט יזהה שאין Local API Server ויעבוד במצב 50MB אוטומטית.
+
 ### 🚀 הפעלה מתקדמת (מגבלה 2GB)
 
 לשליחת קבצים גדולים דרך Local Bot API Server:
 
 **דרישות:** API credentials מ-my.telegram.org, WSL2, Docker
 
-1. **עדכן הגדרות בקוד** - ב-`config.py` החלף ל-2GB:
-```python
-# MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB - for standard Telegram Bot API
-MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB - for Local Bot API Server mode
-```
-
-2. **הכן את הסביבה ב-WSL2**:
+1. **הכן את הסביבה ב-WSL2**:
 ```bash
 # הפעל ב-WSL2
 wsl
@@ -163,7 +150,7 @@ cd /mnt/c/path/to/your/project
 python3 -m venv venv_wsl
 ```
 
-3. **הפעל את Local Bot API Server**:
+2. **הפעל את Local Bot API Server**:
 ```bash
 # אוטומטית (מקובץ .env)
 ./start_local_api.bat
@@ -175,13 +162,19 @@ docker run -d --name telegram-bot-api -p 8081:8081 \
   aiogram/telegram-bot-api:latest --local
 ```
 
-4. **הפעל את הבוט ב-WSL2**:
+3. **הפעל את הבוט ב-WSL2**:
 ```bash
 source venv_wsl/bin/activate
 python bot.py
 ```
 
-5. **לעצירה**:
+**או השתמש בקובץ האוטומטי (מומלץ):**
+```bash
+# הפעלה אוטומטית של שרת + בוט
+./run_bot_with_local_server.bat
+```
+
+4. **לעצירה**:
 ```bash
 ./stop_local_api.bat
 ```
