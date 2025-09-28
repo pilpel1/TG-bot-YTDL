@@ -1,6 +1,10 @@
 @echo off
 @echo [^>^>] Starting backup process...
 
+REM Get project root directory (go up from scripts\windows)
+set "PROJECT_DIR=%~dp0..\.."
+cd /d "%PROJECT_DIR%"
+
 :: הגדרת בראנץ' ברירת מחדל
 set BRANCH=main
 

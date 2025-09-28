@@ -1,6 +1,10 @@
 @echo off
 @echo [^>^>] Activating virtual environment...
 
+REM Get project root directory (go up from scripts\windows)
+set "PROJECT_DIR=%~dp0..\.."
+cd /d "%PROJECT_DIR%"
+
 :: הפעלת הסביבה הווירטואלית
 call venv\Scripts\activate.bat
 

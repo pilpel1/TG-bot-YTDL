@@ -5,14 +5,16 @@ echo  Bot with Local Server Manager
 echo ========================================
 echo.
 
-REM Get current directory for WSL path
+REM Get project root directory (go up from scripts\windows)
+set "PROJECT_DIR=%~dp0..\.."
+cd /d "%PROJECT_DIR%"
 set "CURRENT_DIR=%cd%"
 set "WSL_PATH=/mnt/c%CURRENT_DIR:~2%"
 set "WSL_PATH=%WSL_PATH:\=/%"
 
 echo [1/4] Starting Local Bot API Server...
-echo Starting in background window...
-start "Local Bot API Server" cmd /k ".\start_local_api.bat"
+echo Starting server...
+start "Local Bot API Server" cmd /c "scripts\windows\start_local_api.bat"
 
 echo [2/4] Waiting 20 seconds for server to initialize...
 timeout /t 20 /nobreak >nul
@@ -41,13 +43,12 @@ echo ========================================
 echo  🚀 Bot with Local Server Started!
 echo ========================================
 echo.
-echo Two windows should now be open:
-echo  1. Local Bot API Server (background)
-echo  2. Bot running in WSL2
+echo Bot is now running in WSL2 terminal.
+echo Local API Server is running in background.
 echo.
 echo To stop everything:
 echo  - Close the WSL2 terminal (Ctrl+C then close)
-echo  - Run: .\stop_local_api.bat
+echo  - Run: scripts\windows\stop_local_api.bat
 echo.
-echo Press any key to continue...
-pause >nul
+echo This window will close automatically in 5 seconds...
+timeout /t 5 /nobreak >nul

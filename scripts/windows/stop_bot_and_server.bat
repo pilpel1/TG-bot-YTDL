@@ -5,8 +5,12 @@ echo  Stopping Bot and Local Server
 echo ========================================
 echo.
 
+REM Get project root directory (go up from scripts\windows)
+set "PROJECT_DIR=%~dp0..\.."
+cd /d "%PROJECT_DIR%"
+
 echo [1/2] Stopping Local Bot API Server...
-call .\stop_local_api.bat
+call scripts\windows\stop_local_api.bat
 
 echo.
 echo [2/2] Note: Please manually close the WSL2 terminal if still open

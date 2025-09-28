@@ -171,12 +171,32 @@ python bot.py
 **או השתמש בקובץ האוטומטי (מומלץ):**
 ```bash
 # הפעלה אוטומטית של שרת + בוט
-./run_bot_with_local_server.bat
+scripts\windows\run_bot_with_local_server.bat
 ```
 
 4. **לעצירה**:
 ```bash
-./stop_local_api.bat
+scripts\windows\stop_local_api.bat
+```
+
+## 🔧 עדכונים ותחזוקה
+
+### עדכון הבוט מ-Git:
+```bash
+# Windows (עם גיבוי אוטומטי של .env ולוגים)
+scripts\windows\update_bot.bat
+
+# Linux (עם גיבוי אוטומטי של .env ולוגים)
+scripts/linux/update_bot.sh
+```
+
+### עדכון yt-dlp:
+```bash
+# Windows (מעדכן גם Windows וגם WSL)
+scripts\windows\update_ytdlp.bat
+
+# Linux
+scripts/linux/update_ytdlp.sh
 ```
 
 ### שימוש בבוט
@@ -198,10 +218,15 @@ TG-bot-YTDL/
 ├── requirements.txt      # חבילות נדרשות
 ├── .env                  # הגדרות (לא לשיתוף!)
 ├── .env.example          # דוגמה להגדרות
-├── start_local_api.bat   # סקריפט להפעלת שרת מקומי
-├── stop_local_api.bat    # סקריפט לעצירת שרת מקומי
 ├── downloads/            # תיקיית הורדות זמנית
-└── logs/                 # היסטוריית הורדות
+├── logs/                 # קבצי לוג
+├── venv/                 # סביבה וירטואלית (Windows)
+├── venv_wsl/             # סביבה וירטואלית (WSL2)
+├── scripts/              # סקריפטי הפעלה וניהול
+│   ├── windows/          # סקריפטים עבור Windows (.bat)
+│   ├── linux/            # סקריפטים עבור Linux (.sh)
+│   └── README.md         # תיעוד הסקריפטים
+└── README.md             # התיעוד הזה
 ```
 
 ## 🔒 אבטחה
