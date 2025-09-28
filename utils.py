@@ -77,32 +77,41 @@ async def safe_send_message(chat, text, retries=3):
 
 def split_long_text(text, max_length=MAX_CAPTION_LENGTH):
     """
-    חוצה טקסט ארוך למספר חלקים שכל אחד מהם לא עובר את הגבלת האורך של טלגרם
+    חוצה טקסט ארוך למספר חלקים:
+    - החלק הראשון: עד 1024 תווים (למדיה עם caption)
+    - חלקים נוספים: עד 4096 תווים כל אחד (הודעות טקסט רגילות)
     
     Args:
         text (str): הטקסט המקורי
-        max_length (int): האורך המקסימלי לכל חלק (ברירת מחדל: 1024)
+        max_length (int): האורך המקסימלי לחלק הראשון (ברירת מחדל: 1024)
     
     Returns:
         list: רשימת חלקי הטקסט
     """
-    if not text or len(text) <= max_length:
-        return [text] if text else []
+    if not text:
+        return []
+    
+    # אם הטקסט קצר מהמגבלה הראשונה - מחזירים אותו כמו שהוא
+    if len(text) <= max_length:
+        return [text]
     
     chunks = []
     start = 0
+    is_first_chunk = True
     
     while start < len(text):
-        end = start + max_length
+        # החלק הראשון מוגבל ל-1024, השאר ל-4096
+        current_max_length = max_length if is_first_chunk else 4096
+        end = start + current_max_length
         
         # אם זה החלק האחרון
         if end >= len(text):
             chunks.append(text[start:].strip())
             break
         
-        # חיפוש פסקה חדשה בין תו 900 ל-1023
-        search_start = start + 900 if start + 900 < end else start
-        newline_pos = text.rfind('\n', search_start, end - 1)  # -1 כדי לא לחרוג מ-1023
+        # חיפוש פסקה חדשה בחלק האחרון של הטקסט (90% מהמגבלה)
+        search_start = start + int(current_max_length * 0.9)
+        newline_pos = text.rfind('\n', search_start, end - 1)
         
         if newline_pos > search_start:
             # מצאנו פסקה חדשה - נחתוך שם
@@ -110,14 +119,17 @@ def split_long_text(text, max_length=MAX_CAPTION_LENGTH):
             start = newline_pos + 1
         else:
             # אין פסקה חדשה - חיפוש רווח
-            space_pos = text.rfind(' ', search_start, end - 1)  # -1 כדי לא לחרוג מ-1023
+            space_pos = text.rfind(' ', search_start, end - 1)
             if space_pos > search_start:
                 chunks.append(text[start:space_pos].strip())
                 start = space_pos + 1
             else:
-                # חיתוך קשיח ב-1023 כדי לא לחרוג
-                chunks.append(text[start:start + 1023].strip())
-                start = start + 1023
+                # חיתוך קשיח במגבלה
+                safe_end = start + current_max_length - 1
+                chunks.append(text[start:safe_end].strip())
+                start = safe_end
+        
+        is_first_chunk = False
     
     return [chunk for chunk in chunks if chunk]
 
