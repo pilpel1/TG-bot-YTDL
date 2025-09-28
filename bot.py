@@ -42,28 +42,20 @@ def main():
         # For 2GB file support: uncomment the next 2 lines and run Local Bot API Server
         # For 50MB limit: comment out the next 2 lines to use standard Telegram API
         
-        # בדיקה אם Local API Server זמין (עם ניסיונות חוזרים)
-        local_api_available = False
-        import requests
-        import time
-        
-        for attempt in range(3):  # 3 ניסיונות
-            try:
-                response = requests.get("http://localhost:8081", timeout=3)
-                if response.status_code == 200:
-                    local_api_available = True
-                    # עדכון מגבלת הקבצים ל-2GB
-                    import config
-                    config.MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024
-                    logger.info("Local API Server detected - using 2GB mode")
-                    break
-            except:
-                if attempt < 2:  # לא הניסיון האחרון
-                    logger.info(f"Checking for Local API Server... attempt {attempt + 1}/3")
-                    time.sleep(2)  # המתנה של 2 שניות בין ניסיונות
-                continue
-        
-        if not local_api_available:
+        # בדיקה אם Local API Server זמין
+        try:
+            import requests
+            response = requests.get("http://localhost:8081", timeout=2)
+            local_api_available = response.status_code == 200
+            if local_api_available:
+                # עדכון מגבלת הקבצים ל-2GB
+                import config
+                config.MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024
+                logger.info("Local API Server detected - using 2GB mode")
+            else:
+                logger.info("Local API Server not available - using standard 50MB mode")
+        except:
+            local_api_available = False
             logger.info("Local API Server not available - using standard 50MB mode")
         
         if local_api_available:
