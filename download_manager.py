@@ -566,9 +566,11 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             
             else:
                 if not is_playlist:
+                    max_size_mb = MAX_FILE_SIZE / (1024 * 1024)
+                    max_size_display = f"{max_size_mb:.0f}MB" if max_size_mb < 1024 else f"{max_size_mb/1024:.0f}GB"
                     await safe_edit_message(
                         status_message,
-                        f'הקובץ גדול מדי ({size_mb:.1f}MB). מגבלה מקסימלית: 2GB. נסה באיכות נמוכה יותר.'
+                        f'הקובץ גדול מדי ({size_mb:.1f}MB). מגבלה מקסימלית: {max_size_display}. נסה באיכות נמוכה יותר.'
                     )
                 return False
     
