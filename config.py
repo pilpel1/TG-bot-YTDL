@@ -17,8 +17,19 @@ LOGS_DIR = Path('logs')
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
-# Download settings - will be set dynamically in bot.py
-MAX_FILE_SIZE = 50 * 1024 * 1024  # Default: 50MB - will be updated if Local API Server is available
+# Download settings - auto-detect based on Local API Server availability
+try:
+    import requests
+    response = requests.get("http://localhost:8081", timeout=2)
+    if response.status_code == 404:  # Server is running but endpoint doesn't exist - that's normal
+        MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB - for Local Bot API Server mode
+        print("Local API Server detected - 2GB file limit enabled")
+    else:
+        MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB - for standard Telegram Bot API
+        print("Using standard Telegram API - 50MB file limit")
+except:
+    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB - for standard Telegram Bot API
+    print("Local API Server not available - using 50MB file limit")
 
 # Quality levels for YouTube videos
 YOUTUBE_QUALITY_LEVELS = [
@@ -43,10 +54,10 @@ DEFAULT_FORMAT = {
 }
 
 # Version info
-VERSION = "0.5.1"
-CHANGELOG = """🆕 גרסה 0.5.1:
-🔧 תיקון בעיות YouTube ושיפורי יציבות
-• זיהוי אוטומטי של Local API Server (2GB vs 50MB)
-• עדכון yt-dlp לגרסה האחרונה לתיקון בעיות nsig
-• תיקון טעינת credentials מ-.env בצורה בטוחה
-• שיפור טיפול בשגיאות YouTube והורדות כושלות""" 
+VERSION = "0.5.2"
+CHANGELOG = """🆕 גרסה 0.5.2:
+🎯 שיפורי ממשק וארגון פרויקט
+• שינוי שמות סקריפטים לשמות אינטואיטיביים יותר
+• הוספת פקודה /mode להצגת מצב הבוט הנוכחי
+• שיפור התנהגות חלונות CLI - מזעור אוטומטי
+• עדכון תיעוד להסברים מדויקים יותר על מצבי ההפעלה""" 

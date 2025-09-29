@@ -1,7 +1,7 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from logger_setup import logger
-from config import YOUTUBE_QUALITY_LEVELS, DEFAULT_FORMAT, VERSION, CHANGELOG
+from config import YOUTUBE_QUALITY_LEVELS, DEFAULT_FORMAT, VERSION, CHANGELOG, MAX_FILE_SIZE
 from download_manager import download_with_quality
 import random
 import re
@@ -192,4 +192,31 @@ async def handle_thank_you(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def version(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """הצגת מידע על הגרסה הנוכחית"""
-    await update.message.reply_text(f"{CHANGELOG}") 
+    await update.message.reply_text(f"{CHANGELOG}")
+
+async def mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """הצגת מידע על המצב הנוכחי של הבוט"""
+    file_size_gb = MAX_FILE_SIZE / (1024 * 1024 * 1024)
+    file_size_mb = MAX_FILE_SIZE / (1024 * 1024)
+    
+    if file_size_gb >= 1:
+        mode_text = f"🚀 **מצב מתקדם** - מגבלת קבצים: {file_size_gb:.1f}GB"
+        server_text = "✅ Local API Server זמין"
+    else:
+        mode_text = f"📱 **מצב פשוט** - מגבלת קבצים: {file_size_mb:.0f}MB"
+        server_text = "❌ Local API Server לא זמין"
+    
+    message = f"""🤖 **מצב הבוט הנוכחי:**
+
+{mode_text}
+{server_text}
+
+ℹ️ **הסבר מצבים:**
+• **מצב פשוט (50MB)**: תמיד עובד עם Telegram API הרגיל
+• **מצב חכם (2GB/50MB)**: מנסה Local Server, אם נכשל עובר ל-50MB
+
+💡 **אפשרויות הפעלה:**
+• `run_bot_simple_50MB` - תמיד 50MB
+• `run_bot_advanced_2GB` - חכם עם auto-fallback"""
+    
+    await update.message.reply_text(message, parse_mode='Markdown') 

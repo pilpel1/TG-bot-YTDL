@@ -50,5 +50,8 @@ echo To stop everything:
 echo  - Close the WSL2 terminal (Ctrl+C then close)
 echo  - Run: scripts\windows\stop_local_api.bat
 echo.
-echo This window will close automatically in 5 seconds...
-timeout /t 5 /nobreak >nul
+echo This window will minimize automatically in 3 seconds...
+timeout /t 3 /nobreak >nul
+
+REM Minimize this window
+powershell -command "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class Win32 { [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow); [DllImport(\"kernel32.dll\")] public static extern IntPtr GetConsoleWindow(); }'; $hwnd = [Win32]::GetConsoleWindow(); [Win32]::ShowWindow($hwnd, 2)" >nul 2>&1

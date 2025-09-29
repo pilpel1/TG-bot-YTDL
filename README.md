@@ -170,8 +170,8 @@ python bot.py
 
 **או השתמש בקובץ האוטומטי (מומלץ):**
 ```bash
-# הפעלה אוטומטית של שרת + בוט
-scripts\windows\run_bot_with_local_server.bat
+# הפעלה חכמה - מנסה 2GB עם fallback ל-50MB
+scripts\windows\run_bot_advanced_2GB.bat
 ```
 
 4. **לעצירה**:

@@ -14,8 +14,8 @@ scripts/
 ## 🪟 Windows Scripts
 
 ### סקריפטים עיקריים:
-- **`run_bot_with_local_server.bat`** - הפעלה מלאה: שרת מקומי + בוט (מצב 2GB)
-- **`run_bot.bat`** - הפעלת בוט פשוטה (מצב 50MB)
+- **`run_bot_advanced_2GB.bat`** - הפעלה חכמה: מנסה שרת מקומי (2GB) עם fallback ל-50MB
+- **`run_bot_simple_50MB.bat`** - הפעלת בוט פשוטה (תמיד 50MB)
 - **`update_bot.bat`** - עדכון הבוט מ-Git (עם גיבוי)
 - **`update_ytdlp.bat`** - עדכון yt-dlp בכל הסביבות
 
@@ -28,8 +28,8 @@ scripts/
 ## 🐧 Linux Scripts
 
 ### סקריפטים עיקריים:
-- **`run_bot_with_local_server.sh`** - הפעלה מלאה: שרת מקומי + בוט (מצב 2GB)
-- **`run_bot.sh`** - הפעלת בוט פשוטה (מצב 50MB)
+- **`run_bot_advanced_2GB.sh`** - הפעלה חכמה: מנסה שרת מקומי (2GB) עם fallback ל-50MB
+- **`run_bot_simple_50MB.sh`** - הפעלת בוט פשוטה (תמיד 50MB)
 - **`update_bot.sh`** - עדכון הבוט מ-Git (עם גיבוי)
 - **`update_ytdlp.sh`** - עדכון yt-dlp
 
@@ -42,10 +42,10 @@ scripts/
 ### מ-Windows:
 ```bash
 # הפעלה מלאה (מומלץ)
-scripts\windows\run_bot_with_local_server.bat
+scripts\windows\run_bot_advanced_2GB.bat
 
 # הפעלה פשוטה
-scripts\windows\run_bot.bat
+scripts\windows\run_bot_simple_50MB.bat
 
 # עדכונים
 scripts\windows\update_bot.bat
@@ -55,10 +55,10 @@ scripts\windows\update_ytdlp.bat
 ### מ-Linux:
 ```bash
 # הפעלה מלאה (מומלץ)
-scripts/linux/run_bot_with_local_server.sh
+scripts/linux/run_bot_advanced_2GB.sh
 
 # הפעלה פשוטה
-scripts/linux/run_bot.sh
+scripts/linux/run_bot_simple_50MB.sh
 
 # עדכונים
 scripts/linux/update_bot.sh
