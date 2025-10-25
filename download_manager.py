@@ -4,53 +4,12 @@ import telegram
 from pathlib import Path
 from logger_setup import logger, log_download
 from config import DOWNLOADS_DIR, MAX_FILE_SIZE
-from utils import send_video_with_long_caption
+from utils import send_video_with_long_caption, is_ffmpeg_available, clean_filename
 import asyncio
 import re
 import uuid
 import subprocess
 import requests
-import shutil
-
-# בדיקה אם FFmpeg זמין
-_ffmpeg_available = None
-
-def is_ffmpeg_available():
-    """בודק אם FFmpeg מותקן במערכת"""
-    global _ffmpeg_available
-    if _ffmpeg_available is None:
-        _ffmpeg_available = shutil.which('ffmpeg') is not None
-    return _ffmpeg_available
-
-def check_ffmpeg_on_startup():
-    """בדיקת FFmpeg בהפעלת הבוט - מציג הודעה פעם אחת"""
-    if is_ffmpeg_available():
-        logger.info("FFmpeg detected - audio extraction will be available")
-    else:
-        logger.warning("FFmpeg not found - audio downloads may result in larger video files")
-
-def clean_filename(filename):
-    """מנקה שם קובץ מתווים לא חוקיים ומקצר אותו אם צריך"""
-    # מחליף תווים לא חוקיים ברווח
-    filename = re.sub(r'[<>:"/\\|?*\u0000-\u001F\u007F-\u009F]', ' ', filename)
-    
-    # מסיר אימוג'ים ותווים מיוחדים
-    filename = ''.join(char for char in filename if ord(char) < 65536)
-    
-    # מנקה רווחים מיותרים
-    filename = ' '.join(filename.split())
-    
-    # מגביל את אורך שם הקובץ
-    max_length = 100  # Windows מגביל ל-260 תווים כולל הנתיב המלא
-    if len(filename) > max_length:
-        name, ext = os.path.splitext(filename)
-        filename = name[:max_length-len(ext)] + ext
-    
-    # אם השם ריק אחרי הניקוי, משתמש ב-UUID
-    if not filename.strip():
-        filename = str(uuid.uuid4())
-    
-    return filename
 
 async def safe_edit_message(message, text):
     """עדכון הודעה עם טיפול בשגיאות"""

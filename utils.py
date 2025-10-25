@@ -1,11 +1,55 @@
 import re
 import asyncio
 import telegram
+import shutil
+import os
+import uuid
 from logger_setup import logger
 from config import DOWNLOADS_DIR
 
 # Maximum caption length for Telegram (1024 characters)
 MAX_CAPTION_LENGTH = 1024
+
+# בדיקה אם FFmpeg זמין
+_ffmpeg_available = None
+
+def is_ffmpeg_available():
+    """בודק אם FFmpeg מותקן במערכת"""
+    global _ffmpeg_available
+    if _ffmpeg_available is None:
+        _ffmpeg_available = shutil.which('ffmpeg') is not None
+    return _ffmpeg_available
+
+def check_ffmpeg_on_startup():
+    """בדיקת FFmpeg בהפעלת הבוט - מציג הודעה פעם אחת"""
+    if is_ffmpeg_available():
+        logger.info("FFmpeg detected - audio extraction will be available")
+    else:
+        logger.warning("FFmpeg not found - audio downloads may result in larger video files")
+    return is_ffmpeg_available()
+
+def clean_filename(filename):
+    """מנקה שם קובץ מתווים לא חוקיים ומקצר אותו אם צריך"""
+    # מחליף תווים לא חוקיים ברווח
+    filename = re.sub(r'[<>:"/\\|?*\u0000-\u001F\u007F-\u009F]', ' ', filename)
+    
+    # מסיר אימוג'ים ותווים מיוחדים
+    filename = ''.join(char for char in filename if ord(char) < 65536)
+    
+    # מנקה רווחים מיותרים
+    filename = ' '.join(filename.split())
+    
+    # מגביל את אורך שם הקובץ
+    max_length = 100  # Windows מגביל ל-260 תווים כולל הנתיב המלא
+    if len(filename) > max_length:
+        name, ext = os.path.splitext(filename)
+        filename = name[:max_length-len(ext)] + ext
+    
+    # אם השם ריק אחרי הניקוי, משתמש ב-UUID
+    if not filename.strip():
+        filename = str(uuid.uuid4())
+    
+    return filename
 
 def cleanup_temp_files():
     """מנקה קבצים זמניים שנשארו מהורדות קודמות"""
