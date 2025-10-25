@@ -16,9 +16,9 @@ echo [1/3] Updating yt-dlp in Windows virtual environment...
 if exist "venv\Scripts\activate.bat" (
     call venv\Scripts\activate.bat
     pip install --upgrade yt-dlp
-    echo ✓ Windows venv updated
+    echo [OK] Windows venv updated
 ) else (
-    echo ⚠ Windows venv not found at: %PROJECT_DIR%venv\Scripts\
+    echo [!] Windows venv not found at: %PROJECT_DIR%venv\Scripts\
 )
 
 echo.
@@ -26,12 +26,12 @@ echo [2/3] Updating yt-dlp in WSL virtual environment...
 if exist "venv_wsl" (
     wsl bash -c "cd '%PROJECT_DIR:\=/%' && cd venv_wsl && source bin/activate && pip install --upgrade yt-dlp"
     if %errorlevel% equ 0 (
-        echo ✓ WSL venv updated
+        echo [OK] WSL venv updated
     ) else (
-        echo ⚠ Failed to update WSL venv
+        echo [!] Failed to update WSL venv
     )
 ) else (
-    echo ⚠ WSL venv not found at: %PROJECT_DIR%venv_wsl\
+    echo [!] WSL venv not found at: %PROJECT_DIR%venv_wsl\
 )
 
 echo.
@@ -52,7 +52,7 @@ if exist "venv_wsl" (
 
 echo.
 echo ========================================
-echo  ✅ Update Complete!
+echo  [OK] Update Complete!
 echo ========================================
 echo.
 pause

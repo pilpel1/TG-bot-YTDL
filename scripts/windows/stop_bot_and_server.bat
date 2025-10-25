@@ -18,7 +18,7 @@ echo       (Press Ctrl+C in the WSL terminal, then close the window)
 
 echo.
 echo ========================================
-echo  🛑 Shutdown Complete
+echo  [X] Shutdown Complete
 echo ========================================
 echo.
 echo All done! Local server stopped.

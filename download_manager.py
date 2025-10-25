@@ -10,6 +10,24 @@ import re
 import uuid
 import subprocess
 import requests
+import shutil
+
+# בדיקה אם FFmpeg זמין
+_ffmpeg_available = None
+
+def is_ffmpeg_available():
+    """בודק אם FFmpeg מותקן במערכת"""
+    global _ffmpeg_available
+    if _ffmpeg_available is None:
+        _ffmpeg_available = shutil.which('ffmpeg') is not None
+    return _ffmpeg_available
+
+def check_ffmpeg_on_startup():
+    """בדיקת FFmpeg בהפעלת הבוט - מציג הודעה פעם אחת"""
+    if is_ffmpeg_available():
+        logger.info("FFmpeg detected - audio extraction will be available")
+    else:
+        logger.warning("FFmpeg not found - audio downloads may result in larger video files")
 
 def clean_filename(filename):
     """מנקה שם קובץ מתווים לא חוקיים ומקצר אותו אם צריך"""
@@ -72,15 +90,30 @@ async def download_playlist(context, status_message, url, download_mode, quality
         logger.info(f"Starting playlist download for URL: {url}")
         await safe_edit_message(status_message, 'מתחיל להוריד את הפלייליסט... ⏳')
         
+        # הגדרת post-processors לפלייליסט
+        playlist_postprocessors = []
+        if download_mode == 'video':
+            if is_ffmpeg_available():
+                playlist_postprocessors.append({
+                    'key': 'FFmpegThumbnailsConvertor',
+                    'format': 'jpg',
+                })
+        elif download_mode == 'audio':
+            if is_ffmpeg_available():
+                playlist_postprocessors.append({
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'm4a',
+                    'preferredquality': '192',
+                })
+            else:
+                logger.warning("FFmpeg not available - downloading audio-only stream without conversion")
+
         # אופציות בסיסיות להורדה
         ydl_opts = {
             'format': format_spec,
             'outtmpl': str(DOWNLOADS_DIR / '%(title)s.%(ext)s'),
             'writethumbnail': True if download_mode == 'video' else False,
-            'postprocessors': [{
-                'key': 'FFmpegThumbnailsConvertor',
-                'format': 'jpg',
-            }] if download_mode == 'video' else [],
+            'postprocessors': playlist_postprocessors,
             'extract_flat': True,  # רק מידע בסיסי בהתחלה
             'quiet': True,
             'no_warnings': True,
@@ -207,7 +240,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         # הגדרות בסיסיות עבור yt-dlp
         format_spec = quality['format']
         if download_mode == 'audio':
-            format_spec = 'bestaudio[ext=m4a]/bestaudio[ext=aac]/bestaudio[ext=mp3]'
+            format_spec = 'bestaudio[ext=m4a]/bestaudio[ext=aac]/bestaudio[ext=mp3]/bestaudio'
             
         # פונקציה שמנקה את שם הקובץ לפני היצירה
         def custom_filename(info_dict, *, prefix=''):
@@ -246,13 +279,28 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 ext = info_dict.get('ext', 'mp4')
                 return str(DOWNLOADS_DIR / f"{filename}.{ext}")
 
+        # הגדרת post-processors
+        postprocessors = []
+        if download_mode == 'video':
+            if is_ffmpeg_available():
+                postprocessors.append({
+                    'key': 'FFmpegThumbnailsConvertor',
+                    'format': 'jpg',
+                })
+        elif download_mode == 'audio':
+            if is_ffmpeg_available():
+                postprocessors.append({
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'm4a',
+                    'preferredquality': '192',
+                })
+            else:
+                logger.warning("FFmpeg not available - downloading audio-only stream without conversion")
+
         ydl_opts = {
             'format': format_spec,
             'writethumbnail': True if download_mode == 'video' else False,
-            'postprocessors': [{
-                'key': 'FFmpegThumbnailsConvertor',
-                'format': 'jpg',
-            }] if download_mode == 'video' else [],
+            'postprocessors': postprocessors,
             'noplaylist': True,
             'socket_timeout': 120,
             'outtmpl': '%(id)s.%(ext)s',
@@ -287,7 +335,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         # הגדרות ספציפיות לפלטפורמות
         if 'youtube.com' in url or 'youtu.be' in url:
             # הגדרות מיוחדות ל-YouTube כדי לטפל בבעיות nsig החדשות
-            ydl_opts.update({
+            youtube_opts = {
                 'extractor_args': {
                     'youtube': {
                         'player_client': ['android', 'web'],
@@ -295,7 +343,6 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                         'skip': ['hls', 'dash']
                     }
                 },
-                'format': 'best[height<=1080][ext=mp4]/best[height<=720][ext=mp4]/best[ext=mp4]/best',
                 'prefer_free_formats': True,
                 'http_headers': {
                     **ydl_opts['http_headers'],
@@ -303,7 +350,13 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     'X-YouTube-Client-Name': '3',
                     'X-YouTube-Client-Version': '17.31.35'
                 }
-            })
+            }
+            
+            # רק לוידאו - דורס את הפורמט. לאודיו - שומר על הפורמט שהגדרנו
+            if download_mode == 'video':
+                youtube_opts['format'] = 'best[height<=1080][ext=mp4]/best[height<=720][ext=mp4]/best[ext=mp4]/best'
+            
+            ydl_opts.update(youtube_opts)
         elif 'tiktok.com' in url:
             # המרת קישור מקוצר לקישור מלא
             if 'vt.tiktok.com' in url:
@@ -445,13 +498,20 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     logger.info("Retrying with different format selection...")
                     
                     # מנסה עם פורמטים פשוטים יותר - ללא מרוכבים
-                    fallback_formats = [
-                        'best[height<=720]/best',
-                        'worst[height>=360]/worst',
-                        'mp4/best',
-                        'best[ext=mp4]/best',
-                        'best[protocol=https]/best[protocol=http]/best'
-                    ]
+                    if download_mode == 'audio':
+                        fallback_formats = [
+                            'bestaudio/best',
+                            'worst[acodec!=none]/worst',
+                            'best[acodec!=none]/best'
+                        ]
+                    else:
+                        fallback_formats = [
+                            'best[height<=720]/best',
+                            'worst[height>=360]/worst',
+                            'mp4/best',
+                            'best[ext=mp4]/best',
+                            'best[protocol=https]/best[protocol=http]/best'
+                        ]
                     
                     for fallback_format in fallback_formats:
                         try:
@@ -464,6 +524,9 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                 'ignore_no_formats_error': True,
                                 'extract_flat': False
                             })
+                            # וודא שה-post-processor לאודיו נשמר גם ב-fallback
+                            if download_mode == 'audio':
+                                ydl_opts_retry['postprocessors'] = postprocessors
                             
                             with yt_dlp.YoutubeDL(ydl_opts_retry) as ydl_retry:
                                 info = ydl_retry.extract_info(url, download=True)
@@ -485,6 +548,23 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 raise Exception("Could not download video")
             
             current_file = Path(ydl.prepare_filename(info))
+            
+            # אם זה אודיו עם post-processor, הקובץ הסופי יהיה עם סיומת m4a
+            if download_mode == 'audio' and is_ffmpeg_available():
+                # מחפש את הקובץ עם הסיומת הנכונה אחרי ה-post-processing
+                base_path = str(current_file).rsplit('.', 1)[0]
+                possible_audio_files = [
+                    Path(f"{base_path}.m4a"),
+                    Path(f"{base_path}.aac"), 
+                    Path(f"{base_path}.mp3"),
+                    current_file  # הקובץ המקורי אם לא היה post-processing
+                ]
+                
+                for audio_file in possible_audio_files:
+                    if audio_file.exists():
+                        current_file = audio_file
+                        logger.info(f"Audio extracted: {audio_file.name} ({audio_file.stat().st_size / (1024*1024):.2f}MB)")
+                        break
             
             # שיקוש התמונה המקדימה בכל הפורמטים האפשריים
             if download_mode == 'video':

@@ -5,12 +5,13 @@
 ## ✨ יכולות
 
 - 📥 הורדת סרטונים מיוטיוב
-- 🎵 המרה לפורמט אודיו (MP3)
+- 🎵 חילוץ אודיו מסרטונים (M4A/AAC/MP3) - **דורש FFmpeg**
 - 🎬 הורדת וידאו באיכות הגבוהה ביותר
 - 🚀 **תמיכה בקבצים גדולים עד 2GB** (דרך Local Bot API Server)
 - 📝 שמירת היסטוריית הורדות
 - 🔄 ניסיונות חוזרים במקרה של כשלון
 - 💬 ממשק משתמש בעברית
+- ⚡ זיהוי אוטומטי של FFmpeg והתאמת התנהגות
 
 ## 🚀 התקנה
 
@@ -50,18 +51,27 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-4. **התקן FFmpeg (מומלץ מאוד):**
-```bash
-# Python package (קל ונוח)
-pip install ffmpeg-python
+4. **התקן FFmpeg (חובה להורדת אודיו!):**
 
-# או התקנה מהמערכת:
-# Windows - הורד מ: https://ffmpeg.org/download.html
+⚠️ **חשוב:** FFmpeg נדרש כדי לחלץ אודיו מסרטונים. בלעדיו, הורדות אודיו עלולות להיכשל או להוריד קבצי וידאו מלאים.
+
+```bash
+# Windows - הורד והתקן מ:
+# https://ffmpeg.org/download.html
+# או השתמש ב-winget:
+winget install ffmpeg
+
 # Linux/WSL2 (Ubuntu/Debian)
+sudo apt update
 sudo apt install ffmpeg
 
 # macOS (עם Homebrew)
 brew install ffmpeg
+```
+
+**בדיקה שהתקנה הצליחה:**
+```bash
+ffmpeg -version
 ```
 
 5. צור קובץ `.env`:
@@ -205,6 +215,22 @@ scripts/linux/update_ytdlp.sh
 2. שלח את הפקודה `/start`
 3. שלח קישור ליוטיוב
 4. בחר אם ברצונך להוריד אודיו או וידאו
+
+### 🎵 הורדת אודיו - איך זה עובד?
+
+הבוט משתמש ב-FFmpeg כדי לחלץ אודיו מסרטונים:
+
+**עם FFmpeg מותקן:**
+- ✅ הבוט מוריד את הסרטון
+- ✅ FFmpeg חותך רק את האודיו (חוסך נפח!)
+- ✅ שולח קובץ M4A/AAC/MP3 נקי
+
+**בלי FFmpeg:**
+- ⚠️ הבוט מנסה להוריד אודיו ישירות
+- ⚠️ אם לא זמין - מוריד וידאו מלא
+- ⚠️ הקובץ יהיה גדול יותר
+
+**המלצה:** התקן FFmpeg לחוויה מיטבית!
 
 ## 📁 מבנה הפרויקט
 

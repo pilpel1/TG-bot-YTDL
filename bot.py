@@ -5,6 +5,7 @@ from logger_setup import logger
 from config import BOT_TOKEN
 from bot_handlers import start, ask_format, button_click, handle_thank_you, version, mode
 from utils import cleanup_temp_files
+from download_manager import check_ffmpeg_on_startup
 
 async def error_handler(update: Update, context):
     """טיפול בשגיאות של הבוט"""
@@ -37,6 +38,9 @@ def main():
     try:
         # ניקוי קבצים זמניים מהפעלה קודמת
         cleanup_temp_files()
+        
+        # בדיקת FFmpeg
+        check_ffmpeg_on_startup()
         
         # Initialize the bot with custom settings
         # For 2GB file support: uncomment the next 2 lines and run Local Bot API Server
