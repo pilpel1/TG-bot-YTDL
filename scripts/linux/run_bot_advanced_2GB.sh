@@ -13,7 +13,7 @@ echo "[1/4] Starting Local Bot API Server..."
 echo "Starting server..."
 
 # Start Local Bot API Server
-bash scripts/linux/start_local_api.sh
+bash scripts/linux/start_local_api.sh no-wait
 
 echo
 echo "[2/4] Waiting 10 seconds for server to initialize..."

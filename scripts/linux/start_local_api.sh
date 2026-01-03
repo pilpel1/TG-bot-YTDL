@@ -49,7 +49,10 @@ if [ $? -eq 0 ]; then
     docker ps --filter "name=telegram-bot-api"
     echo
     echo "You can now run your bot with the local API server!"
-    read -p "Press any key to continue..."
+
+    if [ "$1" != "no-wait" ]; then
+        read -p "Press any key to continue..."
+    fi
 else
     echo
     echo "Failed to start Local Bot API Server"
