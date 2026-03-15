@@ -15,6 +15,11 @@ THANK_YOU_RESPONSES = [
     "בשמחה! ✨"
 ]
 
+SUPPORTED_SITES_MESSAGE = (
+    "אני תומך בהורדה מיוטיוב, טוויטר, טיקטוק, אינסטגרם, פייסבוק, "
+    "לינקדאין, פינטרסט, רדיט, ואולי גם מעוד אתרי וידאו מוכרים, שווה לנסות 😊"
+)
+
 def is_valid_url(url: str) -> bool:
     """בודק האם המחרוזת היא URL תקין"""
     url_pattern = re.compile(
@@ -51,7 +56,7 @@ def is_thank_you_message(text: str) -> bool:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         'שלום! 👋\n'
-        'אני בוט להורדת סרטונים ממגוון אתרים כמו יוטיוב, פייסבוק, אינסטגרם, טיקטוק ועוד.\n'
+        f'{SUPPORTED_SITES_MESSAGE}\n'
         'פשוט שלח לי קישור ואני אשאל אותך אם תרצה להוריד אודיו או וידאו.\n'
         'עבור סרטוני יוטיוב תוכל גם לבחור איכות.'
     )
@@ -113,13 +118,8 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif not is_thank:
         # אם אין URL וגם אין תודה, שולח הודעת הסבר
         await message.reply_text(
-            "אנא שלח קישור תקין (URL) מאחד מהאתרים הבאים:\n"
-            "• יוטיוב\n"
-            "• פייסבוק\n"
-            "• אינסטגרם\n"
-            "• טוויטר/X\n"
-            "• טיקטוק\n\n"
-            "ניתן לנסות גם קישורים מאתרי מדיה פופולריים אחרים 😊"
+            "אנא שלח קישור תקין (URL).\n"
+            f"{SUPPORTED_SITES_MESSAGE}"
         )
 
 async def ask_quality(message, download_mode):
