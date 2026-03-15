@@ -180,6 +180,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         # בדיקה אם זה פלייליסט
         if not is_playlist:
             try:
+
                 pre_check_opts = {'quiet': True, 'extract_flat': True}
                 if is_facebook_url(url):
                     has_cookies, cookies_path = get_facebook_cookies_status()
