@@ -53,13 +53,15 @@ DEFAULT_FORMAT = {
     'quality_name': 'איכות מקסימלית'
 }
 
+# Facebook cookies file path (Netscape format, exported from browser)
+FACEBOOK_COOKIES_FILE = Path(os.getenv('FACEBOOK_COOKIES_FILE', 'facebook_cookies.txt'))
+
 # Version info
-VERSION = "0.5.3"
-CHANGELOG = """🆕 גרסה 0.5.3:
-🎵 תיקון באג הורדת אודיו ושיפורים טכניים
-• תיקון באג קריטי: הבוט הוריד וידאו מלא במקום אודיו בלבד
-• אינטגרציה עם FFmpeg לחילוץ אודיו אמיתי (הפחתת גודל פי 5-6!)
-• זיהוי אוטומטי של FFmpeg בהפעלת הבוט
-• שיפורי בחירת פורמט YouTube וטיפול בבעיות nsig/SABR
-• הוראות התקנה מפורטות של FFmpeg בתיעוד
-• תיקון תצוגת אימוג'ים בסקריפטי Windows""" 
+VERSION = "0.6.0"
+CHANGELOG = """🆕 גרסה 0.6.0:
+📘 שיפור תמיכה בהורדה מפייסבוק
+• תמיכה בכל סוגי קישורי פייסבוק (Reels, Watch, Stories, Groups, Posts)
+• הורדה מאומתת עם cookies מהדפדפן (Netscape format)
+• נורמליזציה חכמה של URL-ים (fb.watch, share links, mobile links)
+• הודעות שגיאה ברורות + פקודת /fb_help עם הנחיות הגדרה
+• fallback חכם לפורמטים שונים""" 

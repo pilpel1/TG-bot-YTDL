@@ -3,7 +3,7 @@ import yt_dlp
 import telegram
 from pathlib import Path
 from logger_setup import logger, log_download
-from config import DOWNLOADS_DIR, MAX_FILE_SIZE
+from config import DOWNLOADS_DIR, MAX_FILE_SIZE, FACEBOOK_COOKIES_FILE
 from utils import send_video_with_long_caption, is_ffmpeg_available, clean_filename
 import asyncio
 import re
@@ -180,7 +180,12 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         # בדיקה אם זה פלייליסט
         if not is_playlist:
             try:
-                with yt_dlp.YoutubeDL({'quiet': True, 'extract_flat': True}) as ydl:
+                pre_check_opts = {'quiet': True, 'extract_flat': True}
+                if is_facebook_url(url):
+                    has_cookies, cookies_path = get_facebook_cookies_status()
+                    if has_cookies:
+                        pre_check_opts['cookiefile'] = str(cookies_path)
+                with yt_dlp.YoutubeDL(pre_check_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
                     # בדיקת תוכן מוגבל
                     if info.get('age_limit', 0) > 0 or info.get('content_warning'):
@@ -402,38 +407,44 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 'no_check_certificate': True,
                 'ignore_no_formats_error': True
             })
-        elif 'facebook.com' in url or 'fb.watch' in url:
-            # ניקוי והמרת הקישור
-            if 'share/v/' in url:
-                video_id = url.split('/v/')[-1].split('/')[0]
-                url = f'https://www.facebook.com/watch?v={video_id}'
-            elif 'fb.watch' in url:
-                video_id = url.split('/')[-1].split('?')[0]
-                url = f'https://www.facebook.com/watch?v={video_id}'
-            
-            logger.info(f"Converted Facebook URL: {url}")
-            
-            ydl_opts.update({
-                'format': 'dash,progressive',
+        elif is_facebook_url(url):
+            url, fb_url_type = normalize_facebook_url(url)
+            logger.info(f"Facebook URL type: {fb_url_type}, URL: {url}")
+
+            has_cookies, cookies_path = get_facebook_cookies_status()
+
+            fb_opts = {
+                'format': 'best[ext=mp4]/best',
                 'extract_flat': False,
                 'ignore_no_formats_error': True,
+                'no_check_formats': True,
                 'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': '*/*',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
                     'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
                     'Origin': 'https://www.facebook.com',
                     'Referer': 'https://www.facebook.com/',
-                    'Sec-Fetch-Dest': 'empty',
-                    'Sec-Fetch-Mode': 'cors',
-                    'Sec-Fetch-Site': 'same-origin'
+                    'DNT': '1',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
+                    'sec-ch-ua': '"Chromium";v="131", "Google Chrome";v="131"',
+                    'sec-ch-ua-mobile': '?0',
+                    'sec-ch-ua-platform': '"Windows"',
                 }
-            })
+            }
 
-            # הוספת קוקיז אם הקובץ קיים
-            cookies_file = Path('facebook_cookies.txt')
-            if cookies_file.exists():
-                ydl_opts['cookiefile'] = str(cookies_file)
-                logger.info("Using facebook_cookies.txt for download.")
+            if has_cookies:
+                fb_opts['cookiefile'] = str(cookies_path)
+                logger.info("Using Facebook cookies for authenticated download")
+            else:
+                logger.warning("No Facebook cookies file found - download may fail for private/restricted content")
+
+            ydl_opts.update(fb_opts)
 
         if not is_playlist:
             await safe_edit_message(
@@ -452,7 +463,9 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     "Requested format is not available",
                     "nsig extraction failed",
                     "Some formats may be missing",
-                    "Only images are available"
+                    "Only images are available",
+                    "Cannot parse data",
+                    "No video formats found",
                 ]):
                     logger.info("Retrying with different format selection...")
                     
@@ -620,12 +633,40 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         if not is_playlist:
             if "Sign in to confirm your age" in error_msg:
                 await safe_edit_message(status_message, 'הסרטון מוגבל לצפייה, לא ניתן להוריד ⛔')
-                raise  # מעביר את השגיאה ל-error_handler
+                raise
             elif "Video unavailable" in error_msg:
                 await safe_edit_message(status_message, 'הסרטון לא זמין 😕')
+            elif is_facebook_url(url):
+                fb_has_cookies, _ = get_facebook_cookies_status()
+                if not fb_has_cookies:
+                    await safe_edit_message(
+                        status_message,
+                        'ההורדה מפייסבוק נכשלה 😕\n\n'
+                        'כדי להוריד מפייסבוק צריך קובץ cookies.\n'
+                        'שלח /fb_help לקבלת הנחיות הגדרה.'
+                    )
+                elif 'login' in error_msg.lower() or 'log in' in error_msg.lower() or 'must log in' in error_msg.lower():
+                    await safe_edit_message(
+                        status_message,
+                        'הסרטון דורש התחברות לפייסבוק 🔒\n'
+                        'ייתכן שקובץ ה-cookies פג תוקף.\n'
+                        'יש לייצא cookies מחדש מהדפדפן - שלח /fb_help'
+                    )
+                elif 'Cannot parse data' in error_msg:
+                    await safe_edit_message(
+                        status_message,
+                        'פייסבוק שינה את המבנה של הדף 😕\n'
+                        'נסה לעדכן yt-dlp: pip install --upgrade yt-dlp'
+                    )
+                else:
+                    await safe_edit_message(
+                        status_message,
+                        'ההורדה מפייסבוק נכשלה 😕\n'
+                        'נסה לשלוח קישור ישיר לסרטון (לא לפוסט).'
+                    )
             else:
                 await safe_edit_message(status_message, 'משהו השתבש בהורדה 😕')
-        raise  # מעביר את השגיאה הלאה
+        raise
     
     finally:
         # ניקוי הקבצים הנוכחיים
@@ -649,3 +690,103 @@ def resolve_tiktok_url(url):
     except Exception as e:
         logger.error(f"Error resolving TikTok URL: {e}")
         return url
+
+
+def is_facebook_url(url):
+    """בודק אם ה-URL הוא של פייסבוק"""
+    fb_patterns = [
+        'facebook.com', 'fb.watch', 'fb.com',
+        'www.facebook.com', 'm.facebook.com',
+        'web.facebook.com', 'l.facebook.com',
+    ]
+    return any(p in url.lower() for p in fb_patterns)
+
+
+def normalize_facebook_url(url):
+    """
+    ממיר כל סוגי URL של פייסבוק לפורמט שyt-dlp מכיר.
+    מחזיר (normalized_url, url_type) - url_type לצורכי logging.
+    """
+    original_url = url
+
+    # fb.watch/XXXXX -> resolve the redirect to get the real URL
+    if 'fb.watch' in url:
+        try:
+            response = requests.head(url, allow_redirects=True, timeout=10)
+            url = response.url
+            logger.info(f"Resolved fb.watch -> {url}")
+        except Exception as e:
+            logger.warning(f"Failed to resolve fb.watch URL: {e}")
+            return url, 'fb.watch'
+
+    # share/v/XXXXX links (mobile share)
+    if '/share/v/' in url or '/share/r/' in url:
+        try:
+            response = requests.head(url, allow_redirects=True, timeout=10)
+            url = response.url
+            logger.info(f"Resolved share link -> {url}")
+        except Exception:
+            pass
+
+    # /reel/ID -> yt-dlp has a dedicated FacebookReelIE
+    if '/reel/' in url:
+        reel_match = re.search(r'/reel/(\d+)', url)
+        if reel_match:
+            url = f'https://www.facebook.com/reel/{reel_match.group(1)}'
+            logger.info(f"Facebook Reel URL: {url}")
+            return url, 'reel'
+
+    # m.facebook.com -> www.facebook.com (yt-dlp does this internally too)
+    url = re.sub(r'https?://m\.facebook\.com', 'https://www.facebook.com', url)
+    url = re.sub(r'https?://web\.facebook\.com', 'https://www.facebook.com', url)
+
+    # /watch/?v=ID
+    watch_match = re.search(r'[?&]v=(\d+)', url)
+    if watch_match and '/watch' in url:
+        return url, 'watch'
+
+    # /videos/ID/
+    if '/videos/' in url:
+        return url, 'video'
+
+    # story.php?story_fbid=X
+    if 'story.php' in url or 'story_fbid' in url:
+        return url, 'story'
+
+    # /posts/ links (may contain embedded video)
+    if '/posts/' in url:
+        return url, 'post'
+
+    # groups/X/permalink/
+    if '/groups/' in url and ('/permalink/' in url or '/posts/' in url):
+        return url, 'group_post'
+
+    if url != original_url:
+        logger.info(f"Normalized Facebook URL: {original_url} -> {url}")
+
+    return url, 'generic'
+
+
+def get_facebook_cookies_status():
+    """בודק אם קובץ cookies קיים ותקין"""
+    cookies_path = FACEBOOK_COOKIES_FILE
+    if not cookies_path.exists():
+        return False, None
+    
+    try:
+        size = cookies_path.stat().st_size
+        if size < 100:
+            logger.warning("Facebook cookies file exists but seems too small")
+            return False, cookies_path
+        
+        with open(cookies_path, 'r', encoding='utf-8', errors='ignore') as f:
+            first_lines = f.read(500)
+            if 'facebook.com' not in first_lines.lower() and '.facebook.com' not in first_lines.lower():
+                logger.warning("Facebook cookies file doesn't seem to contain Facebook cookies")
+                return False, cookies_path
+        
+        logger.info(f"Facebook cookies file found: {cookies_path} ({size} bytes)")
+        return True, cookies_path
+    except Exception as e:
+        logger.error(f"Error reading Facebook cookies file: {e}")
+        return False, cookies_path
