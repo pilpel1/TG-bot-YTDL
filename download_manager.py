@@ -643,15 +643,13 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     await safe_edit_message(
                         status_message,
                         'ההורדה מפייסבוק נכשלה 😕\n\n'
-                        'כדי להוריד מפייסבוק צריך קובץ cookies.\n'
-                        'שלח /fb_help לקבלת הנחיות הגדרה.'
+                        'ההורדה לא זמינה כרגע.'
                     )
                 elif 'login' in error_msg.lower() or 'log in' in error_msg.lower() or 'must log in' in error_msg.lower():
                     await safe_edit_message(
                         status_message,
                         'הסרטון דורש התחברות לפייסבוק 🔒\n'
-                        'ייתכן שקובץ ה-cookies פג תוקף.\n'
-                        'יש לייצא cookies מחדש מהדפדפן - שלח /fb_help'
+                        'ההורדה לא זמינה כרגע.'
                     )
                 elif 'Cannot parse data' in error_msg:
                     await safe_edit_message(

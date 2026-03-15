@@ -194,27 +194,6 @@ async def version(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """הצגת מידע על הגרסה הנוכחית"""
     await update.message.reply_text(f"{CHANGELOG}")
 
-async def fb_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """הנחיות להגדרת cookies של פייסבוק"""
-    await update.message.reply_text(
-        '🔧 *הגדרת הורדה מפייסבוק*\n\n'
-        'כדי להוריד סרטונים מפייסבוק, הבוט צריך קובץ cookies מהדפדפן שלך.\n\n'
-        '*שלבים:*\n'
-        '1. התקן את התוסף "Cookie-Editor" בדפדפן\n'
-        '   • [Chrome](https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm)\n'
-        '   • [Firefox](https://addons.mozilla.org/addon/cookie-editor/)\n\n'
-        '2. היכנס לפייסבוק בדפדפן (ודא שאתה מחובר)\n\n'
-        '3. לחץ על אייקון התוסף Cookie-Editor\n\n'
-        '4. לחץ על "Export" ובחר פורמט *"Netscape"*\n\n'
-        '5. צור קובץ בשם `facebook_cookies.txt` בתיקיית הבוט והדבק את התוכן\n\n'
-        '⚠️ *חשוב:*\n'
-        '• ה-cookies פגים תוקף אחרי כמה שבועות - צריך לייצא מחדש\n'
-        '• אל תשתף את הקובץ - הוא מכיל גישה לחשבון שלך\n'
-        '• הקובץ כבר ב-.gitignore ולא יעלה ל-git',
-        parse_mode='Markdown',
-        disable_web_page_preview=True
-    )
-
 
 async def mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """הצגת מידע על המצב הנוכחי של הבוט"""
