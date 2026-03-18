@@ -322,6 +322,11 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 youtube_opts['format'] = 'best[height<=1080][ext=mp4]/best[height<=720][ext=mp4]/best[ext=mp4]/best'
             
             ydl_opts.update(youtube_opts)
+        elif 'vimeo.com' in url:
+            ydl_opts.pop('http_headers', None)
+            ydl_opts.update({
+                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            })
         elif 'tiktok.com' in url:
             # המרת קישור מקוצר לקישור מלא
             if 'vt.tiktok.com' in url:
@@ -542,11 +547,42 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             # שיקוש התמונה המקדימה בכל הפורמטים האפשריים
             if download_mode == 'video':
                 base_path = str(current_file).rsplit('.', 1)[0]
+                video_id = info.get('id', '')
                 for ext in ['.jpg', '.webp', '.png']:
-                    thumb_path = base_path + ext
-                    if os.path.exists(thumb_path):
-                        thumbnail_file = Path(thumb_path)
+                    candidates = [base_path + ext]
+                    if video_id:
+                        candidates.append(str(DOWNLOADS_DIR / f"{video_id}{ext}"))
+                    for thumb_path in candidates:
+                        if os.path.exists(thumb_path):
+                            thumbnail_file = Path(thumb_path)
+                            break
+                    if thumbnail_file:
                         break
+
+                # fallback: אם אין תמונה או שהיא קטנה מדי (placeholder) - חילוץ מהוידאו
+                MIN_THUMBNAIL_SIZE = 20000  # פחות מ-20KB = כנראה placeholder
+                thumb_size = thumbnail_file.stat().st_size if (thumbnail_file and thumbnail_file.exists()) else 0
+                if is_ffmpeg_available() and current_file.exists() and thumb_size < MIN_THUMBNAIL_SIZE:
+                    original_thumbnail_file = thumbnail_file
+                    extracted_thumb = DOWNLOADS_DIR / f"{video_id or 'thumb'}_extracted.jpg"
+                    try:
+                        result = subprocess.run([
+                            'ffmpeg', '-y', '-ss', '00:00:03',
+                            '-i', str(current_file),
+                            '-vframes', '1', '-q:v', '2',
+                            '-vf', 'scale=320:-1',
+                            str(extracted_thumb)
+                        ], capture_output=True, timeout=30)
+                        if result.returncode == 0 and extracted_thumb.exists() and extracted_thumb.stat().st_size > 0:
+                            if thumbnail_file and thumbnail_file.exists():
+                                thumbnail_file.unlink()
+                            thumbnail_file = extracted_thumb
+                            logger.info(f"Extracted thumbnail from video ({extracted_thumb.stat().st_size} bytes)")
+                        else:
+                            thumbnail_file = original_thumbnail_file
+                    except Exception as e:
+                        thumbnail_file = original_thumbnail_file
+                        logger.warning(f"Failed to extract thumbnail from video: {e}")
             
             if not current_file.exists():
                 raise Exception("File not downloaded")
@@ -569,13 +605,10 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                 pool_timeout=180
                             )
                         else:
-                            thumbnail_data = None
+                            thumbnail_input = None
                             if thumbnail_file and thumbnail_file.exists():
-                                try:
-                                    with open(thumbnail_file, 'rb') as thumb:
-                                        thumbnail_data = thumb.read()
-                                except Exception as e:
-                                    logger.error(f"Error reading thumbnail: {e}")
+                                if thumbnail_file.stat().st_size > 0:
+                                    thumbnail_input = thumbnail_file
                                 
                             await send_video_with_long_caption(
                                 status_message,
@@ -584,7 +617,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                 duration=info.get('duration'),
                                 width=info.get('width', 0),
                                 height=info.get('height', 0),
-                                thumbnail=thumbnail_data if thumbnail_data else None,
+                                thumbnail=thumbnail_input,
                                 supports_streaming=True,
                                 read_timeout=180,
                                 write_timeout=180,
