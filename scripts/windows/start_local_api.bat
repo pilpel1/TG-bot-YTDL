@@ -7,8 +7,8 @@ set "PROJECT_DIR=%~dp0..\.."
 cd /d "%PROJECT_DIR%"
 
 REM Load API credentials from .env file
-for /f "tokens=1,2 delims==" %%a in ('type .env ^| findstr TELEGRAM_API_ID') do set TELEGRAM_API_ID=%%b
-for /f "tokens=1,2 delims==" %%a in ('type .env ^| findstr TELEGRAM_API_HASH') do set TELEGRAM_API_HASH=%%b
+for /f "tokens=1,* delims==" %%a in ('type .env ^| findstr /b "TELEGRAM_API_ID="') do set TELEGRAM_API_ID=%%b
+for /f "tokens=1,* delims==" %%a in ('type .env ^| findstr /b "TELEGRAM_API_HASH="') do set TELEGRAM_API_HASH=%%b
 
 REM Check if credentials were loaded
 if "%TELEGRAM_API_ID%"=="" (

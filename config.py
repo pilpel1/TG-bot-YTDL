@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+import requests
 
 # Load environment variables
 load_dotenv()
@@ -8,6 +9,23 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 
 if not BOT_TOKEN:
     raise ValueError("Please set BOT_TOKEN in .env file")
+
+LOCAL_API_HOST = "http://localhost:8081"
+LOCAL_API_BASE_URL = f"{LOCAL_API_HOST}/bot"
+LOCAL_API_FILE_URL = f"{LOCAL_API_HOST}/file/bot"
+
+
+def is_local_api_available(timeout=5):
+    """Check the real Bot API endpoint, not just the HTTP listener."""
+    try:
+        response = requests.get(f"{LOCAL_API_BASE_URL}{BOT_TOKEN}/getMe", timeout=timeout)
+        if not response.ok:
+            return False
+
+        payload = response.json()
+        return payload.get("ok") is True
+    except Exception:
+        return False
 
 # Paths
 DOWNLOADS_DIR = Path('downloads')
@@ -17,17 +35,13 @@ LOGS_DIR = Path('logs')
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
-# Download settings - auto-detect based on Local API Server availability
-try:
-    import requests
-    response = requests.get("http://localhost:8081", timeout=2)
-    if response.status_code == 404:  # Server is running but endpoint doesn't exist - that's normal
-        MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB - for Local Bot API Server mode
-        print("Local API Server detected - 2GB file limit enabled")
-    else:
-        MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB - for standard Telegram Bot API
-        print("Using standard Telegram API - 50MB file limit")
-except:
+# Download settings - auto-detect based on real Local API availability
+LOCAL_API_AVAILABLE = is_local_api_available()
+
+if LOCAL_API_AVAILABLE:
+    MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB - for Local Bot API Server mode
+    print("Local API Server detected - 2GB file limit enabled")
+else:
     MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB - for standard Telegram Bot API
     print("Local API Server not available - using 50MB file limit")
 

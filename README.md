@@ -156,35 +156,28 @@ python bot.py
 wsl
 cd /mnt/c/path/to/your/project
 
-# צור סביבה וירטואלית ל-WSL2 (אם עדיין לא קיימת)
-python3 -m venv venv_wsl
+# צור סביבה וירטואלית (אם עדיין לא קיימת)
+python3 -m venv venv
 ```
 
-2. **הפעל את Local Bot API Server**:
+2. **הפעל את מסלול ה-2GB מתוך WSL**:
 ```bash
-# אוטומטית (מקובץ .env)
-./start_local_api.bat
-
-# או ידנית
-docker run -d --name telegram-bot-api -p 8081:8081 \
-  -e TELEGRAM_API_ID=your_api_id \
-  -e TELEGRAM_API_HASH=your_api_hash \
-  aiogram/telegram-bot-api:latest --local
+# מסלול מומלץ - מרים את Local API, ממתין לשרת, ואז מפעיל את הבוט
+scripts/linux/run_bot_advanced_2GB.sh
 ```
 
-3. **הפעל את הבוט ב-WSL2**:
+3. **או מ-Windows, דרך wrapper שפותח WSL**:
 ```bash
-source venv_wsl/bin/activate
-python bot.py
-```
-
-**או השתמש בקובץ האוטומטי (מומלץ):**
-```bash
-# הפעלה חכמה - מנסה 2GB עם fallback ל-50MB
 scripts\windows\run_bot_advanced_2GB.bat
 ```
 
-4. **לעצירה**:
+4. **אם תרצה להרים את השרת ידנית בלבד**:
+```bash
+# מתוך WSL
+scripts/linux/start_local_api.sh
+```
+
+5. **לעצירה**:
 ```bash
 scripts\windows\stop_local_api.bat
 ```
@@ -246,8 +239,7 @@ TG-bot-YTDL/
 ├── .env.example          # דוגמה להגדרות
 ├── downloads/            # תיקיית הורדות זמנית
 ├── logs/                 # קבצי לוג
-├── venv/                 # סביבה וירטואלית (Windows)
-├── venv_wsl/             # סביבה וירטואלית (WSL2)
+├── venv/                 # סביבה וירטואלית
 ├── scripts/              # סקריפטי הפעלה וניהול
 │   ├── windows/          # סקריפטים עבור Windows (.bat)
 │   ├── linux/            # סקריפטים עבור Linux (.sh)

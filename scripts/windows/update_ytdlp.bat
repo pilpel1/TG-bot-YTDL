@@ -23,15 +23,15 @@ if exist "venv\Scripts\activate.bat" (
 
 echo.
 echo [2/3] Updating yt-dlp in WSL virtual environment...
-if exist "venv_wsl" (
-    wsl bash -c "cd '%PROJECT_DIR:\=/%' && cd venv_wsl && source bin/activate && pip install --upgrade yt-dlp"
+if exist "venv\bin\activate" (
+    wsl bash -c "cd '%PROJECT_DIR:\=/%' && cd venv && source bin/activate && pip install --upgrade yt-dlp"
     if %errorlevel% equ 0 (
         echo [OK] WSL venv updated
     ) else (
         echo [!] Failed to update WSL venv
     )
 ) else (
-    echo [!] WSL venv not found at: %PROJECT_DIR%venv_wsl\
+    echo [!] WSL venv not found at: %PROJECT_DIR%venv\bin\
 )
 
 echo.
@@ -44,8 +44,8 @@ if exist "venv\Scripts\yt-dlp.exe" (
 )
 
 echo WSL version:
-if exist "venv_wsl" (
-    wsl bash -c "cd '%PROJECT_DIR:\=/%' && cd venv_wsl && source bin/activate && yt-dlp --version" 2>nul || echo Not available
+if exist "venv\bin\activate" (
+    wsl bash -c "cd '%PROJECT_DIR:\=/%' && cd venv && source bin/activate && yt-dlp --version" 2>nul || echo Not available
 ) else (
     echo Not available
 )

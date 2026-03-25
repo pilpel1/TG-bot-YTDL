@@ -14,7 +14,7 @@ scripts/
 ## 🪟 Windows Scripts
 
 ### סקריפטים עיקריים:
-- **`run_bot_advanced_2GB.bat`** - הפעלה חכמה: מנסה שרת מקומי (2GB) עם fallback ל-50MB
+- **`run_bot_advanced_2GB.bat`** - wrapper ל-Windows שפותח חלון WSL ומריץ את מסלול ה-2GB כולו מתוך WSL
 - **`run_bot_simple_50MB.bat`** - הפעלת בוט פשוטה (תמיד 50MB)
 - **`update_bot.bat`** - עדכון הבוט מ-Git (עם גיבוי)
 - **`update_ytdlp.bat`** - עדכון yt-dlp בכל הסביבות
@@ -28,7 +28,7 @@ scripts/
 ## 🐧 Linux Scripts
 
 ### סקריפטים עיקריים:
-- **`run_bot_advanced_2GB.sh`** - הפעלה חכמה: מנסה שרת מקומי (2GB) עם fallback ל-50MB
+- **`run_bot_advanced_2GB.sh`** - מסלול ה-2GB הרשמי: מרים Local API ב-WSL, ממתין ל-readiness, ואז מפעיל את הבוט
 - **`run_bot_simple_50MB.sh`** - הפעלת בוט פשוטה (תמיד 50MB)
 - **`update_bot.sh`** - עדכון הבוט מ-Git (עם גיבוי)
 - **`update_ytdlp.sh`** - עדכון yt-dlp
@@ -41,10 +41,10 @@ scripts/
 
 ### מ-Windows:
 ```bash
-# הפעלה מלאה (מומלץ)
+# הפעלה מתקדמת - פותחת WSL ומריצה שם את כל מסלול ה-2GB
 scripts\windows\run_bot_advanced_2GB.bat
 
-# הפעלה פשוטה
+# הפעלה פשוטה - Windows בלבד, תמיד 50MB
 scripts\windows\run_bot_simple_50MB.bat
 
 # עדכונים
@@ -54,7 +54,7 @@ scripts\windows\update_ytdlp.bat
 
 ### מ-Linux:
 ```bash
-# הפעלה מלאה (מומלץ)
+# הפעלה מלאה ב-WSL/Linux - המסלול הרשמי ל-2GB
 scripts/linux/run_bot_advanced_2GB.sh
 
 # הפעלה פשוטה
@@ -78,3 +78,4 @@ scripts/linux/update_ytdlp.sh
 - סקריפטי Linux משתמשים ב-`dirname` ו-`pwd`
 - כל הסקריפטים עובדים מכל מיקום בפרויקט
 - סקריפטי Linux צריכים הרשאות הרצה (`chmod +x`)
+- מסלול `2GB` מנוהל כולו מתוך WSL כדי למנוע בעיות timing בין Windows ל-WSL

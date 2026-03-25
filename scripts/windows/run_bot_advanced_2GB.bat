@@ -1,7 +1,7 @@
 @echo off
-title Bot with Local Server Manager
+title Bot 2GB Launcher
 echo ========================================
-echo  Bot with Local Server Manager
+echo  Bot 2GB Launcher
 echo ========================================
 echo.
 
@@ -12,43 +12,29 @@ set "CURRENT_DIR=%cd%"
 set "WSL_PATH=/mnt/c%CURRENT_DIR:~2%"
 set "WSL_PATH=%WSL_PATH:\=/%"
 
-echo [1/4] Starting Local Bot API Server...
-echo Starting server...
-start "Local Bot API Server" cmd /c "scripts\windows\start_local_api.bat"
-
-echo [2/4] Waiting 25 seconds for server to initialize...
-timeout /t 25 /nobreak >nul
-
-echo [3/4] Checking server status...
-curl -s http://localhost:8081 >nul 2>&1
-if %errorlevel% equ 0 (
-    echo Local server is responding!
-) else (
-    echo Warning: Server might not be ready yet
-)
-
-echo [4/4] Starting bot in WSL2...
-echo Opening WSL2 terminal...
+echo [1/2] Opening WSL2 terminal...
+echo The advanced 2GB flow now runs entirely inside WSL.
+echo This avoids Windows/WSL timing issues when detecting the Local API Server.
 echo.
 echo WSL Commands that will run:
 echo   cd %WSL_PATH%
-echo   source venv_wsl/bin/activate
-echo   python bot.py
+echo   bash ./scripts/linux/run_bot_advanced_2GB.sh
 echo.
 
-REM Start WSL in a new window and navigate to project directory
-start "Bot WSL Terminal" wsl -d Ubuntu --cd "%WSL_PATH%" bash -c "echo 'Activating virtual environment...'; source venv_wsl/bin/activate; echo 'Starting bot...'; python bot.py; echo 'Bot stopped. Press any key to close.'; read"
+REM Start the full advanced flow inside one WSL shell
+start "Bot WSL Terminal" wsl -d Ubuntu --cd "%WSL_PATH%" bash -lc "bash ./scripts/linux/run_bot_advanced_2GB.sh; echo; echo 'Flow stopped. Press any key to close.'; read"
 
 echo ========================================
-echo  Bot with Local Server Started!
+echo  WSL Advanced Flow Started
 echo ========================================
 echo.
-echo Bot is now running in WSL2 terminal.
-echo Local API Server is running in background.
+echo The WSL2 terminal is handling both:
+echo  - Local Bot API Server startup
+echo  - Bot startup with 2GB/50MB fallback
 echo.
 echo To stop everything:
-echo  - Close the WSL2 terminal (Ctrl+C then close)
-echo  - Run: scripts\windows\stop_local_api.bat
+echo  - Stop the bot in the WSL terminal (Ctrl+C)
+echo  - Then run: scripts\windows\stop_local_api.bat
 echo.
 echo This window will minimize automatically in 3 seconds...
 timeout /t 3 /nobreak >nul
