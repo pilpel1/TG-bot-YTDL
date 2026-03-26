@@ -20,6 +20,11 @@ read_env_value() {
     tr -d '\r' < .env | sed -n "s/^$1=//p" | head -n 1
 }
 
+is_local_api_ready() {
+    RESPONSE="$(curl -fsS --max-time 5 "http://localhost:8081/bot${BOT_TOKEN}/getMe" 2>/dev/null || true)"
+    [[ "$RESPONSE" == *'"ok":true'* ]]
+}
+
 BOT_TOKEN="$(read_env_value BOT_TOKEN)"
 
 if [ -z "$BOT_TOKEN" ]; then
@@ -28,26 +33,30 @@ if [ -z "$BOT_TOKEN" ]; then
     exit 1
 fi
 
-echo "[1/4] Starting Local Bot API Server..."
-echo "Starting server..."
-
-# Start Local Bot API Server
-bash scripts/linux/start_local_api.sh no-wait || exit 1
-
-echo
-echo "[2/4] Waiting for Local API Server readiness..."
 LOCAL_API_READY=0
-for i in {1..45}; do
-    RESPONSE="$(curl -fsS --max-time 5 "http://localhost:8081/bot${BOT_TOKEN}/getMe" 2>/dev/null || true)"
-    if [[ "$RESPONSE" == *'"ok":true'* ]]; then
-        LOCAL_API_READY=1
-        echo "✓ Local server is ready for bot requests!"
-        break
-    fi
+echo "[1/4] Checking Local Bot API Server..."
+if is_local_api_ready; then
+    LOCAL_API_READY=1
+    echo "✓ Local server is already running and ready."
+else
+    echo "Starting server..."
 
-    echo "  Attempt $i/45: Local API not ready yet..."
-    sleep 2
-done
+    # Start Local Bot API Server
+    bash scripts/linux/start_local_api.sh no-wait || exit 1
+
+    echo
+    echo "[2/4] Waiting for Local API Server readiness..."
+    for i in {1..45}; do
+        if is_local_api_ready; then
+            LOCAL_API_READY=1
+            echo "✓ Local server is ready for bot requests!"
+            break
+        fi
+
+        echo "  Attempt $i/45: Local API not ready yet..."
+        sleep 2
+    done
+fi
 
 echo
 echo "[3/4] Preparing bot runtime..."
