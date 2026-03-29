@@ -4,12 +4,20 @@ import telegram
 from pathlib import Path
 from logger_setup import logger, log_download
 from config import DOWNLOADS_DIR, MAX_FILE_SIZE, FACEBOOK_COOKIES_FILE
-from utils import send_video_with_long_caption, is_ffmpeg_available, clean_filename
+from utils import (
+    send_video_with_long_caption,
+    is_ffmpeg_available,
+    clean_filename,
+    estimate_media_size,
+    format_file_size,
+)
 import asyncio
 import re
 import uuid
 import subprocess
 import requests
+
+UPLOAD_TIMEOUT_SECONDS = 600
 
 async def safe_edit_message(message, text):
     """עדכון הודעה עם טיפול בשגיאות"""
@@ -38,6 +46,54 @@ def get_user_identifier(chat):
             identifier += f" {chat.last_name}"
         return identifier
     return str(chat.id)
+
+
+def extract_max_height_from_format(format_spec):
+    """מחלץ את מגבלת הגובה מ-format selector של yt-dlp."""
+    match = re.search(r'height<=(\d+)', format_spec or '')
+    return int(match.group(1)) if match else None
+
+
+def build_youtube_video_format(format_spec):
+    """מחזיר selector ליוטיוב בהתאם לבחירת האיכות ולזמינות FFmpeg."""
+    requested_height = extract_max_height_from_format(format_spec)
+
+    if is_ffmpeg_available():
+        return format_spec
+
+    if requested_height:
+        return f'best[height<={requested_height}][ext=mp4]/best[height<={requested_height}]/best[ext=mp4]/best'
+
+    return 'best[ext=mp4]/best'
+
+
+def build_youtube_video_fallback_formats(requested_height):
+    """Fallback-ים ששומרים ככל האפשר על מגבלת האיכות שביקש המשתמש."""
+    fallback_formats = []
+
+    if requested_height:
+        if is_ffmpeg_available():
+            fallback_formats.extend([
+                f'bestvideo[height<={requested_height}][ext=mp4]+bestaudio[ext=m4a]/best[height<={requested_height}][ext=mp4]/best[height<={requested_height}]',
+                f'bestvideo[height<={requested_height}]+bestaudio/best[height<={requested_height}]',
+            ])
+
+        fallback_formats.extend([
+            f'best[height<={requested_height}][ext=mp4]/best[height<={requested_height}]',
+            f'best[height<={requested_height}]/best',
+        ])
+
+    fallback_formats.extend([
+        'best[ext=mp4]/best',
+        'best[protocol=https]/best[protocol=http]/best',
+    ])
+
+    deduped_formats = []
+    for fallback_format in fallback_formats:
+        if fallback_format not in deduped_formats:
+            deduped_formats.append(fallback_format)
+
+    return deduped_formats
 
 async def download_playlist(context, status_message, url, download_mode, quality, playlist_info=None):
     """הורדת פלייליסט"""
@@ -132,7 +188,7 @@ async def download_playlist(context, status_message, url, download_mode, quality
                     logger.info(f"Processing video {index}/{total_videos}: {video_url}")
                     
                     # הורדת הסרטון
-                    await download_with_quality(
+                    download_result = await download_with_quality(
                         context,
                         status_message,
                         video_url,
@@ -142,6 +198,11 @@ async def download_playlist(context, status_message, url, download_mode, quality
                         is_playlist=True
                     )
                     
+                    if download_result is False:
+                        logger.info(f"Skipped video {index} due to size or send constraints")
+                        error_videos += 1
+                        continue
+
                     successful_downloads += 1
                     logger.info(f"Successfully processed video {index}")
                 
@@ -206,6 +267,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         format_spec = quality['format']
         if download_mode == 'audio':
             format_spec = 'bestaudio[ext=m4a]/bestaudio[ext=aac]/bestaudio[ext=mp3]/bestaudio'
+        requested_height = extract_max_height_from_format(format_spec)
             
         # פונקציה שמנקה את שם הקובץ לפני היצירה
         def custom_filename(info_dict, *, prefix=''):
@@ -299,29 +361,15 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         
         # הגדרות ספציפיות לפלטפורמות
         if 'youtube.com' in url or 'youtu.be' in url:
-            # הגדרות מיוחדות ל-YouTube כדי לטפל בבעיות nsig החדשות
-            youtube_opts = {
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['android', 'web'],
-                        'player_skip': ['configs'],
-                        'skip': ['hls', 'dash']
-                    }
-                },
-                'prefer_free_formats': True,
-                'http_headers': {
-                    **ydl_opts['http_headers'],
-                    'User-Agent': 'com.google.android.youtube/17.31.35 (Linux; U; Android 11) gzip',
-                    'X-YouTube-Client-Name': '3',
-                    'X-YouTube-Client-Version': '17.31.35'
-                }
-            }
-            
-            # רק לוידאו - דורס את הפורמט. לאודיו - שומר על הפורמט שהגדרנו
             if download_mode == 'video':
-                youtube_opts['format'] = 'best[height<=1080][ext=mp4]/best[height<=720][ext=mp4]/best[ext=mp4]/best'
-            
-            ydl_opts.update(youtube_opts)
+                ydl_opts['format'] = build_youtube_video_format(format_spec)
+                logger.info(
+                    "YouTube quality requested: %s (max_height=%s, ffmpeg=%s, format=%s)",
+                    quality['quality_name'],
+                    requested_height,
+                    is_ffmpeg_available(),
+                    ydl_opts['format']
+                )
         elif 'vimeo.com' in url:
             ydl_opts.pop('http_headers', None)
             ydl_opts.update({
@@ -457,6 +505,40 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 status_message,
                 f'מוריד את הקובץ ב{quality["quality_name"]}... ⏳'
             )
+
+        preflight_opts = ydl_opts.copy()
+        preflight_opts['skip_download'] = True
+
+        preflight_info = None
+        try:
+            with yt_dlp.YoutubeDL(preflight_opts) as ydl_preflight:
+                preflight_info = ydl_preflight.extract_info(url, download=False)
+        except Exception as preflight_error:
+            logger.warning(f"Could not estimate media size before download: {preflight_error}")
+
+        if preflight_info:
+            estimated_size_bytes, is_approximate_size = estimate_media_size(preflight_info)
+            if estimated_size_bytes is not None:
+                logger.info(
+                    "Estimated media size before download: %s%s",
+                    "~" if is_approximate_size else "",
+                    format_file_size(estimated_size_bytes)
+                )
+
+                # Intentionally using the exact bot limit with no safety margin.
+                # If near-limit merges start failing often, revisit and add one.
+                if estimated_size_bytes > MAX_FILE_SIZE:
+                    max_size_display = format_file_size(MAX_FILE_SIZE)
+                    estimated_size_display = format_file_size(estimated_size_bytes)
+                    approx_prefix = "כ-" if is_approximate_size else ""
+
+                    if not is_playlist:
+                        await safe_edit_message(
+                            status_message,
+                            f'הקובץ צפוי להיות גדול מדי ({approx_prefix}{estimated_size_display}). '
+                            f'המגבלה המקסימלית היא {max_size_display}. נסה איכות נמוכה יותר.'
+                        )
+                    return False
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
@@ -483,13 +565,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                             'best[acodec!=none]/best'
                         ]
                     else:
-                        fallback_formats = [
-                            'best[height<=720]/best',
-                            'worst[height>=360]/worst',
-                            'mp4/best',
-                            'best[ext=mp4]/best',
-                            'best[protocol=https]/best[protocol=http]/best'
-                        ]
+                        fallback_formats = build_youtube_video_fallback_formats(requested_height)
                     
                     for fallback_format in fallback_formats:
                         try:
@@ -525,6 +601,14 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             if not info:
                 raise Exception("Could not download video")
             
+            if download_mode == 'video':
+                logger.info(
+                    "Downloaded YouTube format: format_id=%s, resolution=%s, ext=%s",
+                    info.get('format_id'),
+                    info.get('resolution') or f"{info.get('width', '?')}x{info.get('height', '?')}",
+                    info.get('ext')
+                )
+
             current_file = Path(ydl.prepare_filename(info))
             
             # אם זה אודיו עם post-processor, הקובץ הסופי יהיה עם סיומת m4a
@@ -599,10 +683,10 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                 title=info.get('title', 'Audio'),
                                 performer=info.get('uploader', 'Unknown'),
                                 duration=info.get('duration'),
-                                read_timeout=180,
-                                write_timeout=180,
-                                connect_timeout=180,
-                                pool_timeout=180
+                                read_timeout=UPLOAD_TIMEOUT_SECONDS,
+                                write_timeout=UPLOAD_TIMEOUT_SECONDS,
+                                connect_timeout=UPLOAD_TIMEOUT_SECONDS,
+                                pool_timeout=UPLOAD_TIMEOUT_SECONDS
                             )
                         else:
                             thumbnail_input = None
@@ -619,10 +703,10 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                 height=info.get('height', 0),
                                 thumbnail=thumbnail_input,
                                 supports_streaming=True,
-                                read_timeout=180,
-                                write_timeout=180,
-                                connect_timeout=180,
-                                pool_timeout=180
+                                read_timeout=UPLOAD_TIMEOUT_SECONDS,
+                                write_timeout=UPLOAD_TIMEOUT_SECONDS,
+                                connect_timeout=UPLOAD_TIMEOUT_SECONDS,
+                                pool_timeout=UPLOAD_TIMEOUT_SECONDS
                             )
                     
                     # רישום ההורדה

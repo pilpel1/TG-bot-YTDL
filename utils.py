@@ -4,11 +4,13 @@ import telegram
 import shutil
 import os
 import uuid
+import yt_dlp
 from logger_setup import logger
 from config import DOWNLOADS_DIR
 
 # Maximum caption length for Telegram (1024 characters)
 MAX_CAPTION_LENGTH = 1024
+COMMON_YOUTUBE_HEIGHTS = [2160, 1440, 1080, 720, 480, 360, 240, 144]
 
 # בדיקה אם FFmpeg זמין
 _ffmpeg_available = None
@@ -92,6 +94,114 @@ def sanitize_filename(filename):
     """Clean filename from special characters"""
     filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
     return filename
+
+
+def build_youtube_quality_option(height):
+    """בונה אפשרות איכות דינמית לפי רזולוציה."""
+    return {
+        'height': int(height),
+        'format': (
+            f'bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/'
+            f'bestvideo[height<={height}]+bestaudio/'
+            f'best[height<={height}][ext=mp4]/'
+            f'best[height<={height}]'
+        ),
+        'quality_name': f'{height}p'
+    }
+
+
+def extract_available_youtube_heights(formats):
+    """מחלץ רזולוציות וידאו ייחודיות מתוך רשימת פורמטים של YouTube."""
+    heights = set()
+
+    for item in formats or []:
+        height = item.get('height')
+        if not height:
+            continue
+
+        if item.get('vcodec') == 'none':
+            continue
+
+        if item.get('ext') == 'mhtml':
+            continue
+
+        heights.add(int(height))
+
+    if not heights:
+        return []
+
+    preferred_heights = [height for height in COMMON_YOUTUBE_HEIGHTS if height in heights]
+    if preferred_heights:
+        return preferred_heights
+
+    return sorted(heights, reverse=True)
+
+
+def fetch_youtube_quality_options(url):
+    """שולף מ-YouTube את האיכויות הזמינות בפועל עבור סרטון בודד."""
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': False,
+        'noplaylist': True,
+        'socket_timeout': 30,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+
+    if not info or 'entries' in info:
+        return []
+
+    return [
+        build_youtube_quality_option(height)
+        for height in extract_available_youtube_heights(info.get('formats'))
+    ]
+
+
+def estimate_media_size(info):
+    """מחזיר גודל צפוי בבתים עבור הפורמט שנבחר."""
+    selected_formats = info.get('requested_formats') or [info]
+    total_size = 0
+    used_approximation = False
+    has_size_data = False
+
+    for item in selected_formats:
+        exact_size = item.get('filesize')
+        approx_size = item.get('filesize_approx')
+
+        if exact_size:
+            total_size += int(exact_size)
+            has_size_data = True
+        elif approx_size:
+            total_size += int(approx_size)
+            used_approximation = True
+            has_size_data = True
+        else:
+            used_approximation = True
+
+    if not has_size_data:
+        return None, True
+
+    return total_size, used_approximation
+
+
+def format_file_size(size_bytes):
+    """ממיר גודל בבתים למחרוזת קריאה לאדם."""
+    if size_bytes is None:
+        return "לא ידוע"
+
+    units = ['B', 'KB', 'MB', 'GB', 'TB']
+    size = float(size_bytes)
+
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            if unit == 'B':
+                return f"{int(size)}{unit}"
+            return f"{size:.2f}{unit}"
+        size /= 1024
+
+    return f"{size_bytes}B"
 
 async def safe_edit_message(message, text, retries=3):
     """Helper function to safely edit messages with retries"""

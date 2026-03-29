@@ -3,6 +3,8 @@ from telegram.ext import ContextTypes
 from logger_setup import logger
 from config import YOUTUBE_QUALITY_LEVELS, DEFAULT_FORMAT, VERSION, CHANGELOG, MAX_FILE_SIZE
 from download_manager import download_with_quality
+from utils import fetch_youtube_quality_options
+import asyncio
 import random
 import re
 
@@ -95,6 +97,8 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # מתייחס לקישור הראשון שנמצא
         url = valid_urls[0]
         context.user_data['current_url'] = url
+        context.user_data.pop('youtube_quality_options', None)
+        context.user_data.pop('current_quality_index', None)
         
         # בדיקה האם זה קישור יוטיוב
         is_youtube = 'youtube.com' in url or 'youtu.be' in url
@@ -122,20 +126,40 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{SUPPORTED_SITES_MESSAGE}"
         )
 
-async def ask_quality(message, download_mode):
-    """שואל את המשתמש באיזו איכות הוא רוצה להוריד"""
+def build_quality_keyboard(quality_options):
+    """בונה מקלדת בחירת איכות."""
     keyboard = []
-    
-    for i, quality in enumerate(YOUTUBE_QUALITY_LEVELS):
+
+    for i, quality in enumerate(quality_options):
         keyboard.append([
             InlineKeyboardButton(
                 quality['quality_name'],
                 callback_data=f'quality_{i}'
             )
         ])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await message.edit_text('באיזו איכות להוריד את הוידאו?', reply_markup=reply_markup)
+
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def ask_quality(message, context, url):
+    """שואל את המשתמש באיזו רזולוציה הוא רוצה להוריד."""
+    quality_options = []
+
+    try:
+        await message.edit_text('בודק אילו איכויות זמינות לסרטון... ⏳')
+        quality_options = await asyncio.to_thread(fetch_youtube_quality_options, url)
+    except Exception as e:
+        logger.warning(f"Could not fetch dynamic YouTube qualities: {e}")
+
+    if not quality_options:
+        quality_options = YOUTUBE_QUALITY_LEVELS
+        prompt = 'לא הצלחתי לזהות רזולוציות זמינות, אז מציג אפשרויות כלליות.\nבאיזו איכות להוריד את הוידאו?'
+    else:
+        prompt = 'באיזו רזולוציה להוריד את הוידאו?'
+
+    context.user_data['youtube_quality_options'] = quality_options
+    reply_markup = build_quality_keyboard(quality_options)
+    await message.edit_text(prompt, reply_markup=reply_markup)
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -146,9 +170,14 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         quality_index = int(query.data.split('_')[1])
         url = context.user_data.get('current_url')
         download_mode = context.user_data.get('download_mode')
+        quality_options = context.user_data.get('youtube_quality_options') or YOUTUBE_QUALITY_LEVELS
         
         if not url or not download_mode:
             await query.message.reply_text('משהו השתבש, אנא שלח את הקישור שוב.')
+            return
+
+        if quality_index >= len(quality_options):
+            await query.message.reply_text('בחירת האיכות כבר לא תקפה. שלח את הקישור שוב.')
             return
         
         context.user_data['current_quality_index'] = quality_index
@@ -159,8 +188,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             status_message,
             url,
             download_mode,
-            YOUTUBE_QUALITY_LEVELS[quality_index],
-            YOUTUBE_QUALITY_LEVELS
+            quality_options[quality_index],
+            quality_options
         )
     else:
         # טיפול בבחירת פורמט (אודיו/וידאו)
@@ -183,7 +212,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             # עבור וידאו מיוטיוב - שואלים על איכות
-            await ask_quality(query.message, download_mode)
+            await ask_quality(query.message, context, context.user_data.get('current_url'))
 
 async def handle_thank_you(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """מטפל בהודעות תודה"""
