@@ -468,9 +468,13 @@ async def send_video_with_long_caption(message, video_file, video_info, **kwargs
     # הסרת caption מ-kwargs כדי להימנע מכפילות
     kwargs.pop('caption', None)
     
+    bot = message.get_bot()
+    chat_id = message.chat_id
+
     try:
-        video_message = await message.reply_video(
-            video_file,
+        video_message = await bot.send_video(
+            chat_id=chat_id,
+            video=video_file,
             caption=first_caption,
             **kwargs
         )
@@ -478,7 +482,7 @@ async def send_video_with_long_caption(message, video_file, video_info, **kwargs
         # שליחת החלקים הנוספים כהודעות נפרדות
         for chunk in text_chunks[1:]:
             if chunk.strip():
-                await message.reply_text(chunk)
+                await bot.send_message(chat_id=chat_id, text=chunk)
         
         return video_message
         

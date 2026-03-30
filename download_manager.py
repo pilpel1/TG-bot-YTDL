@@ -36,6 +36,23 @@ async def safe_send_message(message, text):
     except Exception as e:
         logger.error(f"Error sending message: {str(e)}")
 
+async def safe_delete_message(message):
+    """מחיקת הודעה עם טיפול בשגיאות נפוצות"""
+    try:
+        await message.delete()
+    except telegram.error.BadRequest as e:
+        if "message to delete not found" in str(e).lower():
+            return
+        logger.warning(f"Could not delete message: {e}")
+    except Exception as e:
+        logger.warning(f"Error deleting message: {e}")
+
+async def replace_status_message(status_message, text):
+    """שולח הודעה חדשה במקום הודעת סטטוס ואז מוחק את הסטטוס הישן"""
+    bot = status_message.get_bot()
+    await bot.send_message(chat_id=status_message.chat_id, text=text)
+    await safe_delete_message(status_message)
+
 def get_user_identifier(chat):
     """מחזיר מזהה משתמש - שם משתמש, שם מלא או ID"""
     if chat.username:
@@ -251,7 +268,6 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     info = ydl.extract_info(url, download=False)
                     # בדיקת תוכן מוגבל
                     if info.get('age_limit', 0) > 0 or info.get('content_warning'):
-                        await safe_edit_message(status_message, 'הסרטון מוגבל לצפייה, לא ניתן להוריד ⛔')
                         raise Exception("Sign in to confirm your age")
                     # בדיקת פלייליסט
                     if 'entries' in info:
@@ -533,7 +549,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     approx_prefix = "כ-" if is_approximate_size else ""
 
                     if not is_playlist:
-                        await safe_edit_message(
+                        await replace_status_message(
                             status_message,
                             f'הקובץ צפוי להיות גדול מדי ({approx_prefix}{estimated_size_display}). '
                             f'המגבלה המקסימלית היא {max_size_display}. נסה איכות נמוכה יותר.'
@@ -678,8 +694,9 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 try:
                     with open(current_file, 'rb') as f:
                         if download_mode == 'audio':
-                            await status_message.reply_audio(
-                                f,
+                            await status_message.get_bot().send_audio(
+                                chat_id=status_message.chat_id,
+                                audio=f,
                                 title=info.get('title', 'Audio'),
                                 performer=info.get('uploader', 'Unknown'),
                                 duration=info.get('duration'),
@@ -719,7 +736,11 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     
                     if not is_playlist:
                         quality_msg = f" ({quality['quality_name']})" if quality['quality_name'] != 'איכות רגילה' else ""
-                        await safe_send_message(status_message, f'הנה הקובץ שלך!{quality_msg} 🎉')
+                        await status_message.get_bot().send_message(
+                            chat_id=status_message.chat_id,
+                            text=f'הנה הקובץ שלך!{quality_msg} 🎉'
+                        )
+                        await safe_delete_message(status_message)
                         context.user_data.pop('current_quality_index', None)
                     
                     logger.info("File sent successfully")
@@ -727,7 +748,10 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 except telegram.error.TimedOut as e:
                     logger.error(f"Timeout during file send: {str(e)}")
                     if not is_playlist:
-                        await safe_edit_message(status_message, 'שליחת הקובץ נכשלה עקב זמן ממושך מדי. נסה שוב או בחר באיכות נמוכה יותר.')
+                        await replace_status_message(
+                            status_message,
+                            'שליחת הקובץ נכשלה עקב זמן ממושך מדי. נסה שוב או בחר באיכות נמוכה יותר.'
+                        )
                     raise
                 
                 except Exception as e:
@@ -738,7 +762,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 if not is_playlist:
                     max_size_mb = MAX_FILE_SIZE / (1024 * 1024)
                     max_size_display = f"{max_size_mb:.0f}MB" if max_size_mb < 1024 else f"{max_size_mb/1024:.0f}GB"
-                    await safe_edit_message(
+                    await replace_status_message(
                         status_message,
                         f'הקובץ גדול מדי ({size_mb:.1f}MB). מגבלה מקסימלית: {max_size_display}. נסה באיכות נמוכה יותר.'
                     )
@@ -750,38 +774,38 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         
         if not is_playlist:
             if "Sign in to confirm your age" in error_msg:
-                await safe_edit_message(status_message, 'הסרטון מוגבל לצפייה, לא ניתן להוריד ⛔')
+                await replace_status_message(status_message, 'הסרטון מוגבל לצפייה, לא ניתן להוריד ⛔')
                 raise
             elif "Video unavailable" in error_msg:
-                await safe_edit_message(status_message, 'הסרטון לא זמין 😕')
+                await replace_status_message(status_message, 'הסרטון לא זמין 😕')
             elif is_facebook_url(url):
                 fb_has_cookies, _ = get_facebook_cookies_status()
                 if not fb_has_cookies:
-                    await safe_edit_message(
+                    await replace_status_message(
                         status_message,
                         'ההורדה מפייסבוק נכשלה 😕\n\n'
                         'ההורדה לא זמינה כרגע.'
                     )
                 elif 'login' in error_msg.lower() or 'log in' in error_msg.lower() or 'must log in' in error_msg.lower():
-                    await safe_edit_message(
+                    await replace_status_message(
                         status_message,
                         'הסרטון דורש התחברות לפייסבוק 🔒\n'
                         'ההורדה לא זמינה כרגע.'
                     )
                 elif 'Cannot parse data' in error_msg:
-                    await safe_edit_message(
+                    await replace_status_message(
                         status_message,
                         'פייסבוק שינה את המבנה של הדף 😕\n'
                         'נסה לעדכן yt-dlp: pip install --upgrade yt-dlp'
                     )
                 else:
-                    await safe_edit_message(
+                    await replace_status_message(
                         status_message,
                         'ההורדה מפייסבוק נכשלה 😕\n'
                         'נסה לשלוח קישור ישיר לסרטון (לא לפוסט).'
                     )
             else:
-                await safe_edit_message(status_message, 'משהו השתבש בהורדה 😕')
+                await replace_status_message(status_message, 'משהו השתבש בהורדה 😕')
         raise
     
     finally:
