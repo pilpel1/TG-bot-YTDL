@@ -27,6 +27,7 @@ SUPPORTED_SITES_MESSAGE = (
     "אני תומך בהורדה מיוטיוב, טוויטר, טיקטוק, אינסטגרם, פייסבוק, "
     "לינקדאין, פינטרסט, רדיט, וימאו, ואולי גם מעוד אתרי וידאו מוכרים, שווה לנסות 😊"
 )
+VERSIONS_URL = "https://github.com/pilpel1/TG-bot-YTDL/blob/main/VERSIONS.md"
 
 
 def clear_download_state(context):
@@ -306,7 +307,12 @@ async def handle_thank_you(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def version(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """הצגת מידע על הגרסה הנוכחית"""
-    await update.message.reply_text(f"{CHANGELOG}")
+    await update.message.reply_text(
+        f"{CHANGELOG}\n\n"
+        f"📚 לגרסאות קודמות: <a href=\"{VERSIONS_URL}\">צפייה ב-GitHub</a>",
+        parse_mode='HTML',
+        disable_web_page_preview=True
+    )
 
 
 async def mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
