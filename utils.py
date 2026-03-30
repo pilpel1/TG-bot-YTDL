@@ -11,6 +11,7 @@ from config import DOWNLOADS_DIR
 # Maximum caption length for Telegram (1024 characters)
 MAX_CAPTION_LENGTH = 1024
 COMMON_YOUTUBE_HEIGHTS = [2160, 1440, 1080, 720, 480, 360, 240, 144]
+YOUTUBE_AUDIO_FORMAT = 'bestaudio[ext=m4a]/bestaudio[ext=aac]/bestaudio[ext=mp3]/bestaudio'
 
 # בדיקה אם FFmpeg זמין
 _ffmpeg_available = None
@@ -100,6 +101,7 @@ def build_youtube_quality_option(height):
     """בונה אפשרות איכות דינמית לפי רזולוציה."""
     return {
         'height': int(height),
+        'download_mode': 'video',
         'format': (
             f'bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/'
             f'bestvideo[height<={height}]+bestaudio/'
@@ -108,6 +110,45 @@ def build_youtube_quality_option(height):
         ),
         'quality_name': f'{height}p'
     }
+
+
+def build_youtube_audio_option():
+    """בונה אפשרות להורדת אודיו בלבד מיוטיוב."""
+    return {
+        'download_mode': 'audio',
+        'format': YOUTUBE_AUDIO_FORMAT,
+        'quality_name': 'אודיו בלבד 🎵'
+    }
+
+
+def build_youtube_playlist_download_options():
+    """בונה אפשרויות הורדה פשוטות לפלייליסט יוטיוב."""
+    return [
+        {
+            'download_mode': 'video',
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best',
+            'quality_name': 'איכות גבוהה',
+            'button_text': 'איכות גבוהה 🎬'
+        },
+        {
+            'download_mode': 'video',
+            'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720][ext=mp4]/best[height<=720]/best[height<=480]',
+            'quality_name': 'איכות רגילה',
+            'button_text': 'איכות רגילה'
+        },
+        {
+            'download_mode': 'video',
+            'format': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480][ext=mp4]/best[height<=480]/best[height<=360]/best',
+            'quality_name': 'איכות נמוכה',
+            'button_text': 'איכות נמוכה'
+        },
+        {
+            'download_mode': 'audio',
+            'format': YOUTUBE_AUDIO_FORMAT,
+            'quality_name': 'אודיו בלבד',
+            'button_text': 'אודיו בלבד 🎵'
+        }
+    ]
 
 
 def extract_available_youtube_heights(formats):
@@ -159,6 +200,35 @@ def fetch_youtube_quality_options(url):
     ]
 
 
+def fetch_youtube_basic_info(url):
+    """שולף metadata בסיסי מיוטיוב כדי לזהות סרטון יחיד מול פלייליסט."""
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': True,
+        'noplaylist': False,
+        'socket_timeout': 30,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        return ydl.extract_info(url, download=False)
+
+
+def fetch_format_info(url, format_selector):
+    """שולף metadata עבור format selector נתון בלי להוריד את הקובץ."""
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': False,
+        'noplaylist': True,
+        'socket_timeout': 30,
+        'format': format_selector,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        return ydl.extract_info(url, download=False)
+
+
 def estimate_media_size(info):
     """מחזיר גודל צפוי בבתים עבור הפורמט שנבחר."""
     selected_formats = info.get('requested_formats') or [info]
@@ -202,6 +272,77 @@ def format_file_size(size_bytes):
         size /= 1024
 
     return f"{size_bytes}B"
+
+
+def get_best_allowed_quality_name(options):
+    """מחזיר את איכות הוידאו הגבוהה ביותר שלא חסומה לפי מגבלת גודל."""
+    for option in options:
+        if option.get('download_mode') != 'video':
+            continue
+        if option.get('is_blocked'):
+            continue
+        return option['quality_name']
+
+    for option in options:
+        if not option.get('is_blocked'):
+            return option['quality_name']
+
+    return None
+
+
+def build_download_option_button_text(option, best_allowed_quality_name=None):
+    """בונה טקסט לכפתור בחירה עם גודל משוער וסימון חסימה/המלצה."""
+    prefix = ''
+    if (
+        option.get('download_mode') == 'video'
+        and not option.get('is_blocked')
+        and option['quality_name'] == best_allowed_quality_name
+    ):
+        prefix = '⭐ '
+
+    size_bytes = option.get('estimated_size_bytes')
+    if size_bytes is None:
+        size_label = 'גודל לא ידוע'
+    else:
+        size_label = format_file_size(size_bytes)
+        if option.get('is_size_approximate'):
+            size_label = f'~{size_label}'
+
+    suffix = ' • חסום' if option.get('is_blocked') else ''
+    return f"{prefix}{option['quality_name']} • {size_label}{suffix}"
+
+
+def fetch_youtube_download_options(url, max_file_size):
+    """שולף אפשרויות הורדה ליוטיוב עם גודל משוער וחסימה לפי מגבלה."""
+    options = fetch_youtube_quality_options(url)
+    options.append(build_youtube_audio_option())
+
+    enriched_options = []
+    for option in options:
+        enriched_option = option.copy()
+        try:
+            info = fetch_format_info(url, option['format'])
+            estimated_size_bytes, is_size_approximate = estimate_media_size(info)
+        except Exception as e:
+            logger.warning(f"Could not estimate size for {option['quality_name']}: {e}")
+            estimated_size_bytes = None
+            is_size_approximate = True
+
+        enriched_option['estimated_size_bytes'] = estimated_size_bytes
+        enriched_option['is_size_approximate'] = is_size_approximate
+        enriched_option['is_blocked'] = (
+            estimated_size_bytes is not None and estimated_size_bytes > max_file_size
+        )
+        enriched_options.append(enriched_option)
+
+    best_allowed_quality_name = get_best_allowed_quality_name(enriched_options)
+    for option in enriched_options:
+        option['button_text'] = build_download_option_button_text(
+            option,
+            best_allowed_quality_name=best_allowed_quality_name
+        )
+
+    return enriched_options
 
 async def safe_edit_message(message, text, retries=3):
     """Helper function to safely edit messages with retries"""

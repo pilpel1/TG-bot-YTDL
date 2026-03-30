@@ -15,6 +15,7 @@ from download_manager import (
 from utils import (
     extract_available_youtube_heights,
     build_youtube_quality_option,
+    build_youtube_audio_option,
     estimate_media_size,
     format_file_size,
 )
@@ -24,6 +25,7 @@ from utils import (
 def mock_update():
     update = MagicMock(spec=Update)
     message = MagicMock(spec=Message)
+    status_message = MagicMock(spec=Message)
     chat = MagicMock(spec=Chat)
     user = MagicMock(spec=User)
     
@@ -37,6 +39,9 @@ def mock_update():
     # Mock async methods
     update.message.reply_text = AsyncMock()
     update.message.edit_text = AsyncMock()
+    status_message.edit_text = AsyncMock()
+    status_message.reply_text = AsyncMock()
+    update.message.reply_text.return_value = status_message
     
     return update
 
@@ -99,9 +104,17 @@ async def test_start_command(mock_update, mock_context):
 @pytest.mark.asyncio
 async def test_ask_format_with_valid_youtube_url(mock_update, mock_context):
     mock_update.message.text = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    await ask_format(mock_update, mock_context)
+    with patch(
+        'bot_handlers.asyncio.to_thread',
+        new=AsyncMock(side_effect=[
+            {'id': 'abc123', 'title': 'Single video'},
+            [build_youtube_quality_option(1080)]
+        ])
+    ):
+        await ask_format(mock_update, mock_context)
+
     mock_update.message.reply_text.assert_called_once()
-    assert isinstance(mock_update.message.reply_text.call_args[1]['reply_markup'], InlineKeyboardMarkup)
+    assert "בודק איכויות זמינות" in mock_update.message.reply_text.call_args[0][0]
 
 @pytest.mark.asyncio
 async def test_ask_format_with_invalid_url(mock_update, mock_context):
@@ -116,7 +129,14 @@ async def test_ask_format_with_multiple_urls(mock_update, mock_context):
     https://www.youtube.com/watch?v=1234
     https://www.youtube.com/watch?v=5678
     """
-    await ask_format(mock_update, mock_context)
+    with patch(
+        'bot_handlers.asyncio.to_thread',
+        new=AsyncMock(side_effect=[
+            {'id': 'abc123', 'title': 'Single video'},
+            [build_youtube_quality_option(1080)]
+        ])
+    ):
+        await ask_format(mock_update, mock_context)
     assert mock_update.message.reply_text.call_count == 2
     assert "זיהיתי מספר קישורים" in mock_update.message.reply_text.call_args_list[0][0][0]
 
@@ -138,7 +158,14 @@ async def test_ask_format_with_empty_message(mock_update, mock_context):
 @pytest.mark.asyncio
 async def test_ask_format_with_thank_you_and_url(mock_update, mock_context):
     mock_update.message.text = "תודה https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    await ask_format(mock_update, mock_context)
+    with patch(
+        'bot_handlers.asyncio.to_thread',
+        new=AsyncMock(side_effect=[
+            {'id': 'abc123', 'title': 'Single video'},
+            [build_youtube_quality_option(1080)]
+        ])
+    ):
+        await ask_format(mock_update, mock_context)
     assert mock_update.message.reply_text.call_count == 2
 
 # Media Message Tests
@@ -147,9 +174,16 @@ async def test_ask_format_with_photo_and_caption(mock_update, mock_context):
     mock_update.message.text = None
     mock_update.message.photo = [MagicMock()]
     mock_update.message.caption = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    await ask_format(mock_update, mock_context)
+    with patch(
+        'bot_handlers.asyncio.to_thread',
+        new=AsyncMock(side_effect=[
+            {'id': 'abc123', 'title': 'Single video'},
+            [build_youtube_quality_option(1080)]
+        ])
+    ):
+        await ask_format(mock_update, mock_context)
     mock_update.message.reply_text.assert_called_once()
-    assert isinstance(mock_update.message.reply_text.call_args[1]['reply_markup'], InlineKeyboardMarkup)
+    assert "בודק איכויות זמינות" in mock_update.message.reply_text.call_args[0][0]
 
 @pytest.mark.asyncio
 async def test_ask_format_with_video_no_caption(mock_update, mock_context):
@@ -188,11 +222,41 @@ async def test_button_click_video_youtube(mock_update, mock_context):
         'is_youtube': True
     }
     
-    with patch('bot_handlers.asyncio.to_thread', new=AsyncMock(return_value=[build_youtube_quality_option(1080)])):
+    mock_update.callback_query.message.reply_text = AsyncMock()
+    status_message = MagicMock(spec=Message)
+    status_message.edit_text = AsyncMock()
+    mock_update.callback_query.message.reply_text.return_value = status_message
+
+    with patch(
+        'bot_handlers.asyncio.to_thread',
+        new=AsyncMock(side_effect=[
+            {'id': 'abc123', 'title': 'Single video'},
+            [build_youtube_quality_option(1080)]
+        ])
+    ):
         await button_click(mock_update, mock_context)
 
-    assert mock_update.callback_query.message.edit_text.call_args_list[-1][0][0] == 'באיזו רזולוציה להוריד את הוידאו?'
-    assert isinstance(mock_update.callback_query.message.edit_text.call_args_list[-1][1]['reply_markup'], InlineKeyboardMarkup)
+    mock_update.callback_query.answer.assert_called_once()
+    assert mock_update.callback_query.message.reply_text.call_args_list[-1][0][0] == 'בודק איכויות זמינות וגודל משוער... ⏳'
+
+
+@pytest.mark.asyncio
+async def test_ask_format_with_youtube_playlist_shows_playlist_options(mock_update, mock_context):
+    mock_update.message.text = "https://www.youtube.com/playlist?list=PL123"
+    status_message = mock_update.message.reply_text.return_value
+
+    with patch(
+        'bot_handlers.asyncio.to_thread',
+        new=AsyncMock(return_value={
+            'title': 'My Playlist',
+            'entries': [{'id': '1'}, {'id': '2'}]
+        })
+    ):
+        await ask_format(mock_update, mock_context)
+
+    status_message.edit_text.assert_called_once()
+    assert "ההגדרה שתיבחר תחול אוטומטית על כל הסרטונים בפלייליסט" in status_message.edit_text.call_args[0][0]
+    assert isinstance(status_message.edit_text.call_args[1]['reply_markup'], InlineKeyboardMarkup)
 
 
 @pytest.mark.asyncio
@@ -201,10 +265,11 @@ async def test_button_click_dynamic_quality_selection_uses_cached_options(mock_u
     mock_update.callback_query.data = "quality_0"
     mock_update.callback_query.message = MagicMock()
     mock_update.callback_query.message.edit_text = AsyncMock()
+    mock_update.callback_query.message.reply_text = AsyncMock()
     mock_context.user_data = {
         'current_url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
         'download_mode': 'video',
-        'youtube_quality_options': [build_youtube_quality_option(720)]
+        'youtube_download_options': [build_youtube_quality_option(720)]
     }
 
     with patch('bot_handlers.download_with_quality') as mock_download:
@@ -214,6 +279,61 @@ async def test_button_click_dynamic_quality_selection_uses_cached_options(mock_u
     selected_quality = mock_download.call_args[0][4]
     assert selected_quality['quality_name'] == '720p'
     assert selected_quality['format'].startswith('bestvideo[height<=720]')
+
+
+@pytest.mark.asyncio
+async def test_button_click_blocked_quality_shows_popup(mock_update, mock_context):
+    mock_update.callback_query = AsyncMock()
+    mock_update.callback_query.data = "quality_0"
+    mock_update.callback_query.message = MagicMock()
+    mock_update.callback_query.message.reply_text = AsyncMock()
+    mock_context.user_data = {
+        'current_url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        'youtube_download_options': [
+            {
+                **build_youtube_quality_option(2160),
+                'is_blocked': True,
+                'estimated_size_bytes': 3 * 1024 * 1024 * 1024,
+            },
+            {
+                **build_youtube_quality_option(1080),
+                'is_blocked': False,
+                'estimated_size_bytes': 500 * 1024 * 1024,
+            },
+            {
+                **build_youtube_audio_option(),
+                'is_blocked': False,
+                'estimated_size_bytes': 50 * 1024 * 1024,
+            }
+        ]
+    }
+
+    await button_click(mock_update, mock_context)
+
+    mock_update.callback_query.answer.assert_called_once()
+    assert "האיכות הגבוהה ביותר שזמינה: 1080p" in mock_update.callback_query.answer.call_args[0][0]
+    assert mock_update.callback_query.answer.call_args[1]['show_alert'] is True
+
+
+@pytest.mark.asyncio
+async def test_button_click_cancel_clears_download_state(mock_update, mock_context):
+    mock_update.callback_query = AsyncMock()
+    mock_update.callback_query.data = "cancel"
+    mock_update.callback_query.message = MagicMock()
+    mock_update.callback_query.message.edit_text = AsyncMock()
+    mock_context.user_data = {
+        'current_url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        'youtube_download_options': [build_youtube_quality_option(720)],
+        'current_quality_index': 0,
+        'download_mode': 'video',
+        'is_youtube': True,
+    }
+
+    await button_click(mock_update, mock_context)
+
+    assert mock_context.user_data == {}
+    mock_update.callback_query.answer.assert_called_once_with('בוטל')
+    mock_update.callback_query.message.edit_text.assert_called_once_with('בוטל. אפשר לשלוח קישור חדש.')
 
 
 def test_extract_max_height_from_format():
