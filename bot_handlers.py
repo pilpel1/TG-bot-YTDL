@@ -3,6 +3,14 @@ from telegram.ext import ContextTypes
 from logger_setup import logger
 from config import YOUTUBE_QUALITY_LEVELS, DEFAULT_FORMAT, VERSION, CHANGELOG, MAX_FILE_SIZE
 from download_manager import download_with_quality
+from utils import (
+    fetch_youtube_download_options,
+    build_youtube_audio_option,
+    get_best_allowed_quality_name,
+    fetch_youtube_basic_info,
+    build_youtube_playlist_download_options,
+)
+import asyncio
 import random
 import re
 
@@ -19,6 +27,19 @@ SUPPORTED_SITES_MESSAGE = (
     "אני תומך בהורדה מיוטיוב, טוויטר, טיקטוק, אינסטגרם, פייסבוק, "
     "לינקדאין, פינטרסט, רדיט, וימאו, ואולי גם מעוד אתרי וידאו מוכרים, שווה לנסות 😊"
 )
+
+
+def clear_download_state(context):
+    """מנקה את מצב ההורדה הנוכחי של המשתמש."""
+    for key in [
+        'current_url',
+        'youtube_quality_options',
+        'youtube_download_options',
+        'current_quality_index',
+        'download_mode',
+        'is_youtube',
+    ]:
+        context.user_data.pop(key, None)
 
 def is_valid_url(url: str) -> bool:
     """בודק האם המחרוזת היא URL תקין"""
@@ -95,10 +116,13 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # מתייחס לקישור הראשון שנמצא
         url = valid_urls[0]
         context.user_data['current_url'] = url
+        context.user_data.pop('youtube_quality_options', None)
+        context.user_data.pop('current_quality_index', None)
         
         # בדיקה האם זה קישור יוטיוב
         is_youtube = 'youtube.com' in url or 'youtu.be' in url
         context.user_data['is_youtube'] = is_youtube
+        context.user_data.pop('youtube_download_options', None)
         
         # אם יש יותר מקישור אחד, שולח הודעת הבהרה
         if len(valid_urls) > 1:
@@ -107,14 +131,20 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "אם תרצה להוריד גם מהקישורים הנוספים, אנא שלח כל קישור בהודעה נפרדת 😊"
             )
         
-        keyboard = [
-            [
-                InlineKeyboardButton("אודיו 🎵", callback_data='audio'),
-                InlineKeyboardButton("וידאו 🎥", callback_data='video')
+        if is_youtube:
+            await show_youtube_download_options(message, context, url)
+        else:
+            keyboard = [
+                [
+                    InlineKeyboardButton("אודיו 🎵", callback_data='audio'),
+                    InlineKeyboardButton("וידאו 🎥", callback_data='video')
+                ],
+                [
+                    InlineKeyboardButton("ביטול", callback_data='cancel')
+                ],
             ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await message.reply_text('מה תרצה להוריד?', reply_markup=reply_markup)
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await message.reply_text('מה תרצה להוריד?', reply_markup=reply_markup)
     elif not is_thank:
         # אם אין URL וגם אין תודה, שולח הודעת הסבר
         await message.reply_text(
@@ -122,35 +152,121 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{SUPPORTED_SITES_MESSAGE}"
         )
 
-async def ask_quality(message, download_mode):
-    """שואל את המשתמש באיזו איכות הוא רוצה להוריד"""
+def build_quality_keyboard(quality_options):
+    """בונה מקלדת בחירת איכות."""
     keyboard = []
-    
-    for i, quality in enumerate(YOUTUBE_QUALITY_LEVELS):
+
+    for i, quality in enumerate(quality_options):
         keyboard.append([
             InlineKeyboardButton(
-                quality['quality_name'],
+                quality.get('button_text', quality['quality_name']),
                 callback_data=f'quality_{i}'
             )
         ])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await message.edit_text('באיזו איכות להוריד את הוידאו?', reply_markup=reply_markup)
+
+    keyboard.append([
+        InlineKeyboardButton("ביטול", callback_data='cancel')
+    ])
+
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_fallback_youtube_download_options():
+    """אפשרויות fallback כלליות אם חילוץ ה-metadata נכשל."""
+    fallback_options = [quality.copy() for quality in YOUTUBE_QUALITY_LEVELS]
+    fallback_options.append(build_youtube_audio_option())
+    return fallback_options
+
+
+def build_playlist_prompt(playlist_info):
+    """בונה הודעת בחירה לפלייליסט יוטיוב."""
+    title = (playlist_info or {}).get('title') or 'הפלייליסט'
+    entries = (playlist_info or {}).get('entries') or []
+    total_videos = len([entry for entry in entries if entry is not None])
+
+    return (
+        f'זיהיתי פלייליסט: {title}\n'
+        f'מספר סרטונים: {total_videos}\n\n'
+        'ההגדרה שתיבחר תחול אוטומטית על כל הסרטונים בפלייליסט.\n'
+        'גודל הקובץ ייבדק מאחורי הקלעים עבור כל סרטון, '
+        'וסרטונים גדולים מדי או בעייתיים יידלגו.\n\n'
+        'מה להוריד מהפלייליסט?'
+    )
+
+
+async def show_youtube_download_options(message, context, url):
+    """שולף אפשרויות הורדה ליוטיוב ומציג אותן ישירות בלי שלב נוסף."""
+    status_message = await message.reply_text('בודק איכויות זמינות וגודל משוער... ⏳')
+    download_options = []
+    playlist_info = None
+
+    try:
+        playlist_info = await asyncio.to_thread(fetch_youtube_basic_info, url)
+    except Exception as e:
+        logger.warning(f"Could not fetch basic YouTube info: {e}")
+
+    if playlist_info and 'entries' in playlist_info:
+        download_options = build_youtube_playlist_download_options()
+        context.user_data['youtube_download_options'] = download_options
+        reply_markup = build_quality_keyboard(download_options)
+        await status_message.edit_text(build_playlist_prompt(playlist_info), reply_markup=reply_markup)
+        return
+
+    try:
+        download_options = await asyncio.to_thread(
+            fetch_youtube_download_options,
+            url,
+            MAX_FILE_SIZE
+        )
+    except Exception as e:
+        logger.warning(f"Could not fetch dynamic YouTube download options: {e}")
+
+    if not download_options:
+        download_options = build_fallback_youtube_download_options()
+        prompt = 'לא הצלחתי לזהות את כל האיכויות הזמינות כרגע.\nבחר מה להוריד:'
+    else:
+        prompt = 'בחר מה להוריד:'
+
+    context.user_data['youtube_download_options'] = download_options
+    reply_markup = build_quality_keyboard(download_options)
+    await status_message.edit_text(prompt, reply_markup=reply_markup)
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+
+    if query.data == 'cancel':
+        clear_download_state(context)
+        await query.answer('בוטל')
+        await query.message.edit_text('בוטל. אפשר לשלוח קישור חדש.')
+        return
     
     if query.data.startswith('quality_'):
         # טיפול בבחירת איכות
         quality_index = int(query.data.split('_')[1])
         url = context.user_data.get('current_url')
-        download_mode = context.user_data.get('download_mode')
+        quality_options = context.user_data.get('youtube_download_options') or build_fallback_youtube_download_options()
         
-        if not url or not download_mode:
+        if not url:
             await query.message.reply_text('משהו השתבש, אנא שלח את הקישור שוב.')
             return
+
+        if quality_index >= len(quality_options):
+            await query.message.reply_text('בחירת האיכות כבר לא תקפה. שלח את הקישור שוב.')
+            return
+
+        selected_option = quality_options[quality_index]
+        download_mode = selected_option.get('download_mode') or context.user_data.get('download_mode')
+
+        if selected_option.get('is_blocked'):
+            best_allowed_quality_name = get_best_allowed_quality_name(quality_options) or 'לא ידוע'
+            await query.answer(
+                'הקובץ גדול מדי ולא יכול להישלח.\n'
+                f'כדאי לנסות איכות נמוכה יותר. האיכות הגבוהה ביותר שזמינה: {best_allowed_quality_name}',
+                show_alert=True
+            )
+            return
         
+        await query.answer()
         context.user_data['current_quality_index'] = quality_index
         status_message = await query.message.edit_text('מתחיל בהורדה... ⏳')
         
@@ -159,11 +275,12 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             status_message,
             url,
             download_mode,
-            YOUTUBE_QUALITY_LEVELS[quality_index],
-            YOUTUBE_QUALITY_LEVELS
+            selected_option,
+            quality_options
         )
     else:
         # טיפול בבחירת פורמט (אודיו/וידאו)
+        await query.answer()
         download_mode = query.data  # 'audio' or 'video'
         context.user_data['download_mode'] = download_mode
         
@@ -181,9 +298,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 quality,
                 YOUTUBE_QUALITY_LEVELS if is_youtube else None
             )
-        else:
-            # עבור וידאו מיוטיוב - שואלים על איכות
-            await ask_quality(query.message, download_mode)
 
 async def handle_thank_you(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """מטפל בהודעות תודה"""
