@@ -16,6 +16,8 @@ from utils import (
     extract_available_youtube_heights,
     build_youtube_quality_option,
     build_youtube_audio_option,
+    build_youtube_download_options_from_info,
+    pick_best_youtube_audio_format,
     estimate_media_size,
     format_file_size,
 )
@@ -372,6 +374,41 @@ def test_estimate_media_size_sums_requested_formats():
 
 def test_format_file_size_formats_gigabytes():
     assert format_file_size(2 * 1024 * 1024 * 1024) == '2.00GB'
+
+
+def test_pick_best_youtube_audio_format_prefers_m4a():
+    formats = [
+        {'format_id': '251', 'vcodec': 'none', 'acodec': 'opus', 'ext': 'webm', 'abr': 160, 'filesize': 2000},
+        {'format_id': '140', 'vcodec': 'none', 'acodec': 'mp4a.40.2', 'ext': 'm4a', 'abr': 128, 'filesize': 1500},
+    ]
+
+    selected_audio = pick_best_youtube_audio_format(formats)
+
+    assert selected_audio['format_id'] == '140'
+
+
+def test_build_youtube_download_options_from_info_uses_single_metadata_response():
+    info = {
+        'formats': [
+            {'format_id': '401', 'height': 2160, 'vcodec': 'av01', 'acodec': 'none', 'ext': 'mp4', 'tbr': 9000, 'filesize': 1200},
+            {'format_id': '399', 'height': 1080, 'vcodec': 'av01', 'acodec': 'none', 'ext': 'mp4', 'tbr': 4500, 'filesize': 700},
+            {'format_id': '247', 'height': 720, 'vcodec': 'vp9', 'acodec': 'none', 'ext': 'webm', 'tbr': 2500, 'filesize': 400},
+            {'format_id': '18', 'height': 360, 'vcodec': 'avc1', 'acodec': 'mp4a.40.2', 'ext': 'mp4', 'tbr': 600, 'filesize': 120},
+            {'format_id': '140', 'height': None, 'vcodec': 'none', 'acodec': 'mp4a.40.2', 'ext': 'm4a', 'abr': 128, 'filesize': 100},
+        ]
+    }
+
+    options = build_youtube_download_options_from_info(info, max_file_size=1000)
+
+    assert [option['quality_name'] for option in options] == ['2160p', '1080p', '720p', '360p', 'אודיו בלבד 🎵']
+    assert options[0]['estimated_size_bytes'] == 1300
+    assert options[0]['is_blocked'] is True
+    assert options[1]['estimated_size_bytes'] == 800
+    assert options[1]['button_text'].startswith('⭐ 1080p')
+    assert options[2]['estimated_size_bytes'] == 500
+    assert options[3]['estimated_size_bytes'] == 120
+    assert options[4]['estimated_size_bytes'] == 100
+    assert options[4]['is_blocked'] is False
 
 # Thank You Handler Tests
 @pytest.mark.asyncio

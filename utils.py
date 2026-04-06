@@ -229,14 +229,16 @@ def fetch_format_info(url, format_selector):
         return ydl.extract_info(url, download=False)
 
 
-def estimate_media_size(info):
-    """מחזיר גודל צפוי בבתים עבור הפורמט שנבחר."""
-    selected_formats = info.get('requested_formats') or [info]
+def estimate_selected_format_size(selected_formats):
+    """מחזיר גודל צפוי בבתים עבור רשימת פורמטים נבחרים."""
     total_size = 0
     used_approximation = False
     has_size_data = False
 
     for item in selected_formats:
+        if not item:
+            continue
+
         exact_size = item.get('filesize')
         approx_size = item.get('filesize_approx')
 
@@ -254,6 +256,142 @@ def estimate_media_size(info):
         return None, True
 
     return total_size, used_approximation
+
+
+def pick_best_youtube_audio_format(formats):
+    """בוחר את פורמט האודיו המתאים ביותר לפי סדר העדיפויות של הסלקטור."""
+    ext_priority = {'m4a': 3, 'aac': 2, 'mp3': 1}
+    candidates = [
+        item for item in formats or []
+        if item.get('vcodec') == 'none' and item.get('acodec') not in (None, 'none')
+    ]
+
+    if not candidates:
+        return None
+
+    def score(item):
+        size_bytes, is_approximate = estimate_selected_format_size([item])
+        return (
+            ext_priority.get(item.get('ext'), 0),
+            float(item.get('abr') or item.get('tbr') or 0),
+            0 if is_approximate else 1,
+            int(size_bytes or 0),
+        )
+
+    return max(candidates, key=score)
+
+
+def pick_best_youtube_video_format(formats, max_height, prefer_separate_streams=True):
+    """בוחר את פורמט הווידאו המתאים ביותר עבור גובה מקסימלי נתון."""
+    candidates = [
+        item for item in formats or []
+        if item.get('vcodec') not in (None, 'none')
+        and item.get('ext') != 'mhtml'
+        and item.get('height')
+        and int(item['height']) <= int(max_height)
+    ]
+
+    if not candidates:
+        return None
+
+    video_only_candidates = [item for item in candidates if item.get('acodec') == 'none']
+    progressive_candidates = [item for item in candidates if item.get('acodec') not in (None, 'none')]
+
+    groups = (
+        [
+            [item for item in video_only_candidates if item.get('ext') == 'mp4'],
+            video_only_candidates,
+            [item for item in progressive_candidates if item.get('ext') == 'mp4'],
+            progressive_candidates,
+        ]
+        if prefer_separate_streams else
+        [
+            [item for item in progressive_candidates if item.get('ext') == 'mp4'],
+            progressive_candidates,
+            [item for item in video_only_candidates if item.get('ext') == 'mp4'],
+            video_only_candidates,
+        ]
+    )
+
+    def score(item):
+        size_bytes, is_approximate = estimate_selected_format_size([item])
+        return (
+            int(item.get('height') or 0),
+            float(item.get('tbr') or 0),
+            0 if is_approximate else 1,
+            int(size_bytes or 0),
+        )
+
+    for group in groups:
+        if group:
+            return max(group, key=score)
+
+    return None
+
+
+def estimate_youtube_download_option_size(option, formats, best_audio_format=None):
+    """מחשב גודל צפוי עבור אפשרות הורדה מיוטיוב מתוך metadata שכבר נשלף."""
+    if option.get('download_mode') == 'audio':
+        selected_formats = [best_audio_format] if best_audio_format else []
+        return estimate_selected_format_size(selected_formats)
+
+    prefer_separate_streams = best_audio_format is not None
+    selected_video_format = pick_best_youtube_video_format(
+        formats,
+        option['height'],
+        prefer_separate_streams=prefer_separate_streams
+    )
+
+    if not selected_video_format:
+        return None, True
+
+    selected_formats = [selected_video_format]
+    if selected_video_format.get('acodec') == 'none' and best_audio_format:
+        selected_formats.append(best_audio_format)
+
+    return estimate_selected_format_size(selected_formats)
+
+
+def build_youtube_download_options_from_info(info, max_file_size):
+    """בונה אפשרויות הורדה וגודל משוער מתוך metadata אחד של YouTube."""
+    formats = (info or {}).get('formats') or []
+    options = [
+        build_youtube_quality_option(height)
+        for height in extract_available_youtube_heights(formats)
+    ]
+    options.append(build_youtube_audio_option())
+
+    best_audio_format = pick_best_youtube_audio_format(formats)
+    enriched_options = []
+
+    for option in options:
+        enriched_option = option.copy()
+        estimated_size_bytes, is_size_approximate = estimate_youtube_download_option_size(
+            enriched_option,
+            formats,
+            best_audio_format=best_audio_format
+        )
+        enriched_option['estimated_size_bytes'] = estimated_size_bytes
+        enriched_option['is_size_approximate'] = is_size_approximate
+        enriched_option['is_blocked'] = (
+            estimated_size_bytes is not None and estimated_size_bytes > max_file_size
+        )
+        enriched_options.append(enriched_option)
+
+    best_allowed_quality_name = get_best_allowed_quality_name(enriched_options)
+    for option in enriched_options:
+        option['button_text'] = build_download_option_button_text(
+            option,
+            best_allowed_quality_name=best_allowed_quality_name
+        )
+
+    return enriched_options
+
+
+def estimate_media_size(info):
+    """מחזיר גודל צפוי בבתים עבור הפורמט שנבחר."""
+    selected_formats = info.get('requested_formats') or [info]
+    return estimate_selected_format_size(selected_formats)
 
 
 def format_file_size(size_bytes):
@@ -314,35 +452,21 @@ def build_download_option_button_text(option, best_allowed_quality_name=None):
 
 def fetch_youtube_download_options(url, max_file_size):
     """שולף אפשרויות הורדה ליוטיוב עם גודל משוער וחסימה לפי מגבלה."""
-    options = fetch_youtube_quality_options(url)
-    options.append(build_youtube_audio_option())
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': False,
+        'noplaylist': True,
+        'socket_timeout': 30,
+    }
 
-    enriched_options = []
-    for option in options:
-        enriched_option = option.copy()
-        try:
-            info = fetch_format_info(url, option['format'])
-            estimated_size_bytes, is_size_approximate = estimate_media_size(info)
-        except Exception as e:
-            logger.warning(f"Could not estimate size for {option['quality_name']}: {e}")
-            estimated_size_bytes = None
-            is_size_approximate = True
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
 
-        enriched_option['estimated_size_bytes'] = estimated_size_bytes
-        enriched_option['is_size_approximate'] = is_size_approximate
-        enriched_option['is_blocked'] = (
-            estimated_size_bytes is not None and estimated_size_bytes > max_file_size
-        )
-        enriched_options.append(enriched_option)
+    if not info or 'entries' in info:
+        return []
 
-    best_allowed_quality_name = get_best_allowed_quality_name(enriched_options)
-    for option in enriched_options:
-        option['button_text'] = build_download_option_button_text(
-            option,
-            best_allowed_quality_name=best_allowed_quality_name
-        )
-
-    return enriched_options
+    return build_youtube_download_options_from_info(info, max_file_size)
 
 async def safe_edit_message(message, text, retries=3):
     """Helper function to safely edit messages with retries"""
