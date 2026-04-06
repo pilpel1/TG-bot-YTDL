@@ -171,7 +171,7 @@ def build_quality_keyboard(quality_options):
         ])
 
     keyboard.append([
-        InlineKeyboardButton("ביטול", callback_data='cancel')
+        InlineKeyboardButton("❌ ביטול", callback_data='cancel')
     ])
 
     return InlineKeyboardMarkup(keyboard)
@@ -185,7 +185,7 @@ def build_format_keyboard():
             InlineKeyboardButton("וידאו 🎥", callback_data='video')
         ],
         [
-            InlineKeyboardButton("ביטול", callback_data='cancel')
+            InlineKeyboardButton("❌ ביטול", callback_data='cancel')
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -193,9 +193,7 @@ def build_format_keyboard():
 
 def build_fallback_youtube_download_options():
     """אפשרויות fallback כלליות אם חילוץ ה-metadata נכשל."""
-    fallback_options = [quality.copy() for quality in YOUTUBE_QUALITY_LEVELS]
-    fallback_options.append(build_youtube_audio_option())
-    return fallback_options
+    return [quality.copy() for quality in YOUTUBE_QUALITY_LEVELS]
 
 
 def build_playlist_prompt(playlist_info):

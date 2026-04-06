@@ -400,15 +400,13 @@ def test_build_youtube_download_options_from_info_uses_single_metadata_response(
 
     options = build_youtube_download_options_from_info(info, max_file_size=1000)
 
-    assert [option['quality_name'] for option in options] == ['2160p', '1080p', '720p', '360p', 'אודיו בלבד 🎵']
+    assert [option['quality_name'] for option in options] == ['2160p', '1080p', '720p', '360p']
     assert options[0]['estimated_size_bytes'] == 1300
     assert options[0]['is_blocked'] is True
     assert options[1]['estimated_size_bytes'] == 800
     assert options[1]['button_text'].startswith('⭐ 1080p')
     assert options[2]['estimated_size_bytes'] == 500
     assert options[3]['estimated_size_bytes'] == 120
-    assert options[4]['estimated_size_bytes'] == 100
-    assert options[4]['is_blocked'] is False
 
 # Thank You Handler Tests
 @pytest.mark.asyncio

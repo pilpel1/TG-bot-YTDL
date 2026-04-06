@@ -141,12 +141,6 @@ def build_youtube_playlist_download_options():
             'format': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480][ext=mp4]/best[height<=480]/best[height<=360]/best',
             'quality_name': 'איכות נמוכה',
             'button_text': 'איכות נמוכה'
-        },
-        {
-            'download_mode': 'audio',
-            'format': YOUTUBE_AUDIO_FORMAT,
-            'quality_name': 'אודיו בלבד',
-            'button_text': 'אודיו בלבד 🎵'
         }
     ]
 
@@ -359,7 +353,6 @@ def build_youtube_download_options_from_info(info, max_file_size):
         build_youtube_quality_option(height)
         for height in extract_available_youtube_heights(formats)
     ]
-    options.append(build_youtube_audio_option())
 
     best_audio_format = pick_best_youtube_audio_format(formats)
     enriched_options = []
