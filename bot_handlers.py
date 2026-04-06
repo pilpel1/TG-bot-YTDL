@@ -36,6 +36,9 @@ def clear_download_state(context):
         'current_url',
         'youtube_quality_options',
         'youtube_download_options',
+        'youtube_prefetch_task',
+        'youtube_prefetch_url',
+        'youtube_prefetch_waiting_for_choice',
         'current_quality_index',
         'download_mode',
         'is_youtube',
@@ -118,12 +121,14 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         url = valid_urls[0]
         context.user_data['current_url'] = url
         context.user_data.pop('youtube_quality_options', None)
+        context.user_data.pop('youtube_download_options', None)
+        context.user_data.pop('youtube_prefetch_task', None)
+        context.user_data.pop('youtube_prefetch_url', None)
         context.user_data.pop('current_quality_index', None)
         
         # בדיקה האם זה קישור יוטיוב
         is_youtube = 'youtube.com' in url or 'youtu.be' in url
         context.user_data['is_youtube'] = is_youtube
-        context.user_data.pop('youtube_download_options', None)
         
         # אם יש יותר מקישור אחד, שולח הודעת הבהרה
         if len(valid_urls) > 1:
@@ -133,19 +138,19 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         
         if is_youtube:
-            await show_youtube_download_options(message, context, url)
+            status_message = await message.reply_text(
+                'מה תרצה להוריד?\n'
+                'אפשר לבחור כבר עכשיו. בינתיים בודק איכויות וידאו זמינות ברקע... ⏳',
+                reply_markup=build_format_keyboard()
+            )
+            prefetch_task = start_youtube_download_options_prefetch(context, url)
+            prefetch_task.add_done_callback(
+                lambda completed_task: asyncio.create_task(
+                    notify_youtube_prefetch_ready(context, url, status_message, completed_task)
+                )
+            )
         else:
-            keyboard = [
-                [
-                    InlineKeyboardButton("אודיו 🎵", callback_data='audio'),
-                    InlineKeyboardButton("וידאו 🎥", callback_data='video')
-                ],
-                [
-                    InlineKeyboardButton("ביטול", callback_data='cancel')
-                ],
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await message.reply_text('מה תרצה להוריד?', reply_markup=reply_markup)
+            await message.reply_text('מה תרצה להוריד?', reply_markup=build_format_keyboard())
     elif not is_thank:
         # אם אין URL וגם אין תודה, שולח הודעת הסבר
         await message.reply_text(
@@ -172,6 +177,20 @@ def build_quality_keyboard(quality_options):
     return InlineKeyboardMarkup(keyboard)
 
 
+def build_format_keyboard():
+    """בונה מקלדת בחירה בסיסית של אודיו/וידאו."""
+    keyboard = [
+        [
+            InlineKeyboardButton("אודיו 🎵", callback_data='audio'),
+            InlineKeyboardButton("וידאו 🎥", callback_data='video')
+        ],
+        [
+            InlineKeyboardButton("ביטול", callback_data='cancel')
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 def build_fallback_youtube_download_options():
     """אפשרויות fallback כלליות אם חילוץ ה-metadata נכשל."""
     fallback_options = [quality.copy() for quality in YOUTUBE_QUALITY_LEVELS]
@@ -195,10 +214,8 @@ def build_playlist_prompt(playlist_info):
     )
 
 
-async def show_youtube_download_options(message, context, url):
-    """שולף אפשרויות הורדה ליוטיוב ומציג אותן ישירות בלי שלב נוסף."""
-    status_message = await message.reply_text('בודק איכויות זמינות וגודל משוער... ⏳')
-    download_options = []
+async def prefetch_youtube_download_options(url):
+    """שולף ברקע metadata ואפשרויות הורדה ליוטיוב."""
     playlist_info = None
 
     try:
@@ -207,12 +224,12 @@ async def show_youtube_download_options(message, context, url):
         logger.warning(f"Could not fetch basic YouTube info: {e}")
 
     if playlist_info and 'entries' in playlist_info:
-        download_options = build_youtube_playlist_download_options()
-        context.user_data['youtube_download_options'] = download_options
-        reply_markup = build_quality_keyboard(download_options)
-        await status_message.edit_text(build_playlist_prompt(playlist_info), reply_markup=reply_markup)
-        return
+        return {
+            'download_options': build_youtube_playlist_download_options(),
+            'prompt': build_playlist_prompt(playlist_info)
+        }
 
+    download_options = []
     try:
         download_options = await asyncio.to_thread(
             fetch_youtube_download_options,
@@ -223,14 +240,82 @@ async def show_youtube_download_options(message, context, url):
         logger.warning(f"Could not fetch dynamic YouTube download options: {e}")
 
     if not download_options:
-        download_options = build_fallback_youtube_download_options()
-        prompt = 'לא הצלחתי לזהות את כל האיכויות הזמינות כרגע.\nבחר מה להוריד:'
-    else:
-        prompt = 'בחר מה להוריד:'
+        return {
+            'download_options': build_fallback_youtube_download_options(),
+            'prompt': 'לא הצלחתי לזהות את כל האיכויות הזמינות כרגע.\nבחר מה להוריד:'
+        }
+
+    return {
+        'download_options': download_options,
+        'prompt': 'בחר מה להוריד:'
+    }
+
+
+def start_youtube_download_options_prefetch(context, url):
+    """מתחיל prefetch ברקע כדי לקצר את ההמתנה אחרי לחיצה על וידאו."""
+    task = asyncio.create_task(prefetch_youtube_download_options(url))
+    context.user_data['youtube_prefetch_task'] = task
+    context.user_data['youtube_prefetch_url'] = url
+    context.user_data['youtube_prefetch_waiting_for_choice'] = True
+    return task
+
+
+async def notify_youtube_prefetch_ready(context, url, message, task):
+    """מעדכן את הודעת הבחירה כשה-prefetch מוכן, אם המשתמש עוד לא בחר."""
+    try:
+        await task
+    except Exception as e:
+        logger.warning(f"Could not finalize YouTube prefetch status message: {e}")
+        return
+
+    if context.user_data.get('youtube_prefetch_task') is not task:
+        return
+
+    if context.user_data.get('youtube_prefetch_url') != url:
+        return
+
+    if not context.user_data.get('youtube_prefetch_waiting_for_choice'):
+        return
+
+    try:
+        await message.edit_text(
+            'מה תרצה להוריד?\n'
+            'אפשר לבחור כבר עכשיו. איכויות הווידאו זמינות.',
+            reply_markup=build_format_keyboard()
+        )
+    except Exception as e:
+        logger.warning(f"Could not update YouTube prefetch ready message: {e}")
+
+
+async def get_youtube_download_options_result(context, url):
+    """מחזיר את תוצאת ה-prefetch אם קיימת, או מבצע שליפה במקום."""
+    task = context.user_data.get('youtube_prefetch_task')
+    prefetched_url = context.user_data.get('youtube_prefetch_url')
+
+    if task and prefetched_url == url:
+        return await task
+
+    return await prefetch_youtube_download_options(url)
+
+
+async def show_youtube_download_options(message, context, url):
+    """מציג את אפשרויות הווידאו ליוטיוב אחרי לחיצה על וידאו."""
+    prefetch_task = context.user_data.get('youtube_prefetch_task')
+    prefetched_url = context.user_data.get('youtube_prefetch_url')
+    context.user_data['youtube_prefetch_waiting_for_choice'] = False
+
+    if prefetch_task and prefetched_url == url and not prefetch_task.done():
+        await message.edit_text('בודק איכויות זמינות וגודל משוער... ⏳')
+
+    prefetched_result = await get_youtube_download_options_result(context, url)
+    download_options = prefetched_result['download_options']
+    prompt = prefetched_result['prompt']
 
     context.user_data['youtube_download_options'] = download_options
+    context.user_data.pop('youtube_prefetch_task', None)
+    context.user_data.pop('youtube_prefetch_url', None)
     reply_markup = build_quality_keyboard(download_options)
-    await status_message.edit_text(prompt, reply_markup=reply_markup)
+    await message.edit_text(prompt, reply_markup=reply_markup)
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -281,23 +366,43 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         # טיפול בבחירת פורמט (אודיו/וידאו)
+        context.user_data['youtube_prefetch_waiting_for_choice'] = False
         await query.answer()
         download_mode = query.data  # 'audio' or 'video'
         context.user_data['download_mode'] = download_mode
         
         is_youtube = context.user_data.get('is_youtube', False)
         
-        if download_mode == 'audio' or not is_youtube:
-            # עבור אודיו או לא-יוטיוב - מתחילים הורדה מיד באיכות הטובה ביותר
+        if download_mode == 'audio':
+            context.user_data.pop('youtube_prefetch_task', None)
+            context.user_data.pop('youtube_prefetch_url', None)
             status_message = await query.message.edit_text('מתחיל בהורדה... ⏳')
-            quality = DEFAULT_FORMAT if not is_youtube else YOUTUBE_QUALITY_LEVELS[1]
+            quality = build_youtube_audio_option() if is_youtube else DEFAULT_FORMAT
             await download_with_quality(
                 context,
                 status_message,
                 context.user_data.get('current_url'),
                 download_mode,
                 quality,
-                YOUTUBE_QUALITY_LEVELS if is_youtube else None
+                context.user_data.get('youtube_download_options') if is_youtube else None
+            )
+        elif not is_youtube:
+            # עבור פלטפורמות שאינן יוטיוב - מתחילים הורדה מיד באיכות הטובה ביותר
+            status_message = await query.message.edit_text('מתחיל בהורדה... ⏳')
+            quality = DEFAULT_FORMAT
+            await download_with_quality(
+                context,
+                status_message,
+                context.user_data.get('current_url'),
+                download_mode,
+                quality,
+                None
+            )
+        else:
+            await show_youtube_download_options(
+                query.message,
+                context,
+                context.user_data.get('current_url')
             )
 
 async def handle_thank_you(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -16,6 +16,8 @@ from utils import (
     extract_available_youtube_heights,
     build_youtube_quality_option,
     build_youtube_audio_option,
+    build_youtube_download_options_from_info,
+    pick_best_youtube_audio_format,
     estimate_media_size,
     format_file_size,
 )
@@ -104,17 +106,15 @@ async def test_start_command(mock_update, mock_context):
 @pytest.mark.asyncio
 async def test_ask_format_with_valid_youtube_url(mock_update, mock_context):
     mock_update.message.text = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    with patch(
-        'bot_handlers.asyncio.to_thread',
-        new=AsyncMock(side_effect=[
-            {'id': 'abc123', 'title': 'Single video'},
-            [build_youtube_quality_option(1080)]
-        ])
-    ):
+    with patch('bot_handlers.start_youtube_download_options_prefetch') as mock_prefetch:
         await ask_format(mock_update, mock_context)
 
     mock_update.message.reply_text.assert_called_once()
-    assert "בודק איכויות זמינות" in mock_update.message.reply_text.call_args[0][0]
+    assert "מה תרצה להוריד?" in mock_update.message.reply_text.call_args[0][0]
+    mock_prefetch.assert_called_once_with(
+        mock_context,
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    )
 
 @pytest.mark.asyncio
 async def test_ask_format_with_invalid_url(mock_update, mock_context):
@@ -129,16 +129,11 @@ async def test_ask_format_with_multiple_urls(mock_update, mock_context):
     https://www.youtube.com/watch?v=1234
     https://www.youtube.com/watch?v=5678
     """
-    with patch(
-        'bot_handlers.asyncio.to_thread',
-        new=AsyncMock(side_effect=[
-            {'id': 'abc123', 'title': 'Single video'},
-            [build_youtube_quality_option(1080)]
-        ])
-    ):
+    with patch('bot_handlers.start_youtube_download_options_prefetch') as mock_prefetch:
         await ask_format(mock_update, mock_context)
     assert mock_update.message.reply_text.call_count == 2
     assert "זיהיתי מספר קישורים" in mock_update.message.reply_text.call_args_list[0][0][0]
+    mock_prefetch.assert_called_once()
 
 # Edge Cases Tests
 @pytest.mark.asyncio
@@ -158,13 +153,7 @@ async def test_ask_format_with_empty_message(mock_update, mock_context):
 @pytest.mark.asyncio
 async def test_ask_format_with_thank_you_and_url(mock_update, mock_context):
     mock_update.message.text = "תודה https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    with patch(
-        'bot_handlers.asyncio.to_thread',
-        new=AsyncMock(side_effect=[
-            {'id': 'abc123', 'title': 'Single video'},
-            [build_youtube_quality_option(1080)]
-        ])
-    ):
+    with patch('bot_handlers.start_youtube_download_options_prefetch'):
         await ask_format(mock_update, mock_context)
     assert mock_update.message.reply_text.call_count == 2
 
@@ -174,16 +163,10 @@ async def test_ask_format_with_photo_and_caption(mock_update, mock_context):
     mock_update.message.text = None
     mock_update.message.photo = [MagicMock()]
     mock_update.message.caption = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    with patch(
-        'bot_handlers.asyncio.to_thread',
-        new=AsyncMock(side_effect=[
-            {'id': 'abc123', 'title': 'Single video'},
-            [build_youtube_quality_option(1080)]
-        ])
-    ):
+    with patch('bot_handlers.start_youtube_download_options_prefetch'):
         await ask_format(mock_update, mock_context)
     mock_update.message.reply_text.assert_called_once()
-    assert "בודק איכויות זמינות" in mock_update.message.reply_text.call_args[0][0]
+    assert "מה תרצה להוריד?" in mock_update.message.reply_text.call_args[0][0]
 
 @pytest.mark.asyncio
 async def test_ask_format_with_video_no_caption(mock_update, mock_context):
@@ -210,6 +193,9 @@ async def test_button_click_audio(mock_update, mock_context):
         mock_download.return_value = AsyncMock()
         await button_click(mock_update, mock_context)
         mock_download.assert_called_once()
+        selected_quality = mock_download.call_args[0][4]
+        assert selected_quality['download_mode'] == 'audio'
+        assert selected_quality['quality_name'] == 'אודיו בלבד 🎵'
 
 @pytest.mark.asyncio
 async def test_button_click_video_youtube(mock_update, mock_context):
@@ -221,42 +207,30 @@ async def test_button_click_video_youtube(mock_update, mock_context):
         'current_url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
         'is_youtube': True
     }
-    
-    mock_update.callback_query.message.reply_text = AsyncMock()
-    status_message = MagicMock(spec=Message)
-    status_message.edit_text = AsyncMock()
-    mock_update.callback_query.message.reply_text.return_value = status_message
-
-    with patch(
-        'bot_handlers.asyncio.to_thread',
-        new=AsyncMock(side_effect=[
-            {'id': 'abc123', 'title': 'Single video'},
-            [build_youtube_quality_option(1080)]
-        ])
-    ):
+    with patch('bot_handlers.show_youtube_download_options', new=AsyncMock()) as mock_show_options:
         await button_click(mock_update, mock_context)
 
     mock_update.callback_query.answer.assert_called_once()
-    assert mock_update.callback_query.message.reply_text.call_args_list[-1][0][0] == 'בודק איכויות זמינות וגודל משוער... ⏳'
+    mock_show_options.assert_awaited_once_with(
+        mock_update.callback_query.message,
+        mock_context,
+        'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+    )
 
 
 @pytest.mark.asyncio
-async def test_ask_format_with_youtube_playlist_shows_playlist_options(mock_update, mock_context):
+async def test_ask_format_with_youtube_playlist_starts_prefetch_and_shows_format_buttons(mock_update, mock_context):
     mock_update.message.text = "https://www.youtube.com/playlist?list=PL123"
-    status_message = mock_update.message.reply_text.return_value
-
-    with patch(
-        'bot_handlers.asyncio.to_thread',
-        new=AsyncMock(return_value={
-            'title': 'My Playlist',
-            'entries': [{'id': '1'}, {'id': '2'}]
-        })
-    ):
+    with patch('bot_handlers.start_youtube_download_options_prefetch') as mock_prefetch:
         await ask_format(mock_update, mock_context)
 
-    status_message.edit_text.assert_called_once()
-    assert "ההגדרה שתיבחר תחול אוטומטית על כל הסרטונים בפלייליסט" in status_message.edit_text.call_args[0][0]
-    assert isinstance(status_message.edit_text.call_args[1]['reply_markup'], InlineKeyboardMarkup)
+    mock_update.message.reply_text.assert_called_once()
+    assert "מה תרצה להוריד?" in mock_update.message.reply_text.call_args[0][0]
+    assert isinstance(mock_update.message.reply_text.call_args[1]['reply_markup'], InlineKeyboardMarkup)
+    mock_prefetch.assert_called_once_with(
+        mock_context,
+        "https://www.youtube.com/playlist?list=PL123"
+    )
 
 
 @pytest.mark.asyncio
@@ -324,6 +298,8 @@ async def test_button_click_cancel_clears_download_state(mock_update, mock_conte
     mock_context.user_data = {
         'current_url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
         'youtube_download_options': [build_youtube_quality_option(720)],
+        'youtube_prefetch_task': AsyncMock(),
+        'youtube_prefetch_url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
         'current_quality_index': 0,
         'download_mode': 'video',
         'is_youtube': True,
@@ -398,6 +374,41 @@ def test_estimate_media_size_sums_requested_formats():
 
 def test_format_file_size_formats_gigabytes():
     assert format_file_size(2 * 1024 * 1024 * 1024) == '2.00GB'
+
+
+def test_pick_best_youtube_audio_format_prefers_m4a():
+    formats = [
+        {'format_id': '251', 'vcodec': 'none', 'acodec': 'opus', 'ext': 'webm', 'abr': 160, 'filesize': 2000},
+        {'format_id': '140', 'vcodec': 'none', 'acodec': 'mp4a.40.2', 'ext': 'm4a', 'abr': 128, 'filesize': 1500},
+    ]
+
+    selected_audio = pick_best_youtube_audio_format(formats)
+
+    assert selected_audio['format_id'] == '140'
+
+
+def test_build_youtube_download_options_from_info_uses_single_metadata_response():
+    info = {
+        'formats': [
+            {'format_id': '401', 'height': 2160, 'vcodec': 'av01', 'acodec': 'none', 'ext': 'mp4', 'tbr': 9000, 'filesize': 1200},
+            {'format_id': '399', 'height': 1080, 'vcodec': 'av01', 'acodec': 'none', 'ext': 'mp4', 'tbr': 4500, 'filesize': 700},
+            {'format_id': '247', 'height': 720, 'vcodec': 'vp9', 'acodec': 'none', 'ext': 'webm', 'tbr': 2500, 'filesize': 400},
+            {'format_id': '18', 'height': 360, 'vcodec': 'avc1', 'acodec': 'mp4a.40.2', 'ext': 'mp4', 'tbr': 600, 'filesize': 120},
+            {'format_id': '140', 'height': None, 'vcodec': 'none', 'acodec': 'mp4a.40.2', 'ext': 'm4a', 'abr': 128, 'filesize': 100},
+        ]
+    }
+
+    options = build_youtube_download_options_from_info(info, max_file_size=1000)
+
+    assert [option['quality_name'] for option in options] == ['2160p', '1080p', '720p', '360p', 'אודיו בלבד 🎵']
+    assert options[0]['estimated_size_bytes'] == 1300
+    assert options[0]['is_blocked'] is True
+    assert options[1]['estimated_size_bytes'] == 800
+    assert options[1]['button_text'].startswith('⭐ 1080p')
+    assert options[2]['estimated_size_bytes'] == 500
+    assert options[3]['estimated_size_bytes'] == 120
+    assert options[4]['estimated_size_bytes'] == 100
+    assert options[4]['is_blocked'] is False
 
 # Thank You Handler Tests
 @pytest.mark.asyncio
