@@ -104,17 +104,15 @@ async def test_start_command(mock_update, mock_context):
 @pytest.mark.asyncio
 async def test_ask_format_with_valid_youtube_url(mock_update, mock_context):
     mock_update.message.text = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    with patch(
-        'bot_handlers.asyncio.to_thread',
-        new=AsyncMock(side_effect=[
-            {'id': 'abc123', 'title': 'Single video'},
-            [build_youtube_quality_option(1080)]
-        ])
-    ):
+    with patch('bot_handlers.start_youtube_download_options_prefetch') as mock_prefetch:
         await ask_format(mock_update, mock_context)
 
     mock_update.message.reply_text.assert_called_once()
-    assert "בודק איכויות זמינות" in mock_update.message.reply_text.call_args[0][0]
+    assert "מה תרצה להוריד?" in mock_update.message.reply_text.call_args[0][0]
+    mock_prefetch.assert_called_once_with(
+        mock_context,
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    )
 
 @pytest.mark.asyncio
 async def test_ask_format_with_invalid_url(mock_update, mock_context):
@@ -129,16 +127,11 @@ async def test_ask_format_with_multiple_urls(mock_update, mock_context):
     https://www.youtube.com/watch?v=1234
     https://www.youtube.com/watch?v=5678
     """
-    with patch(
-        'bot_handlers.asyncio.to_thread',
-        new=AsyncMock(side_effect=[
-            {'id': 'abc123', 'title': 'Single video'},
-            [build_youtube_quality_option(1080)]
-        ])
-    ):
+    with patch('bot_handlers.start_youtube_download_options_prefetch') as mock_prefetch:
         await ask_format(mock_update, mock_context)
     assert mock_update.message.reply_text.call_count == 2
     assert "זיהיתי מספר קישורים" in mock_update.message.reply_text.call_args_list[0][0][0]
+    mock_prefetch.assert_called_once()
 
 # Edge Cases Tests
 @pytest.mark.asyncio
@@ -158,13 +151,7 @@ async def test_ask_format_with_empty_message(mock_update, mock_context):
 @pytest.mark.asyncio
 async def test_ask_format_with_thank_you_and_url(mock_update, mock_context):
     mock_update.message.text = "תודה https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    with patch(
-        'bot_handlers.asyncio.to_thread',
-        new=AsyncMock(side_effect=[
-            {'id': 'abc123', 'title': 'Single video'},
-            [build_youtube_quality_option(1080)]
-        ])
-    ):
+    with patch('bot_handlers.start_youtube_download_options_prefetch'):
         await ask_format(mock_update, mock_context)
     assert mock_update.message.reply_text.call_count == 2
 
@@ -174,16 +161,10 @@ async def test_ask_format_with_photo_and_caption(mock_update, mock_context):
     mock_update.message.text = None
     mock_update.message.photo = [MagicMock()]
     mock_update.message.caption = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    with patch(
-        'bot_handlers.asyncio.to_thread',
-        new=AsyncMock(side_effect=[
-            {'id': 'abc123', 'title': 'Single video'},
-            [build_youtube_quality_option(1080)]
-        ])
-    ):
+    with patch('bot_handlers.start_youtube_download_options_prefetch'):
         await ask_format(mock_update, mock_context)
     mock_update.message.reply_text.assert_called_once()
-    assert "בודק איכויות זמינות" in mock_update.message.reply_text.call_args[0][0]
+    assert "מה תרצה להוריד?" in mock_update.message.reply_text.call_args[0][0]
 
 @pytest.mark.asyncio
 async def test_ask_format_with_video_no_caption(mock_update, mock_context):
@@ -210,6 +191,9 @@ async def test_button_click_audio(mock_update, mock_context):
         mock_download.return_value = AsyncMock()
         await button_click(mock_update, mock_context)
         mock_download.assert_called_once()
+        selected_quality = mock_download.call_args[0][4]
+        assert selected_quality['download_mode'] == 'audio'
+        assert selected_quality['quality_name'] == 'אודיו בלבד 🎵'
 
 @pytest.mark.asyncio
 async def test_button_click_video_youtube(mock_update, mock_context):
@@ -221,42 +205,30 @@ async def test_button_click_video_youtube(mock_update, mock_context):
         'current_url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
         'is_youtube': True
     }
-    
-    mock_update.callback_query.message.reply_text = AsyncMock()
-    status_message = MagicMock(spec=Message)
-    status_message.edit_text = AsyncMock()
-    mock_update.callback_query.message.reply_text.return_value = status_message
-
-    with patch(
-        'bot_handlers.asyncio.to_thread',
-        new=AsyncMock(side_effect=[
-            {'id': 'abc123', 'title': 'Single video'},
-            [build_youtube_quality_option(1080)]
-        ])
-    ):
+    with patch('bot_handlers.show_youtube_download_options', new=AsyncMock()) as mock_show_options:
         await button_click(mock_update, mock_context)
 
     mock_update.callback_query.answer.assert_called_once()
-    assert mock_update.callback_query.message.reply_text.call_args_list[-1][0][0] == 'בודק איכויות זמינות וגודל משוער... ⏳'
+    mock_show_options.assert_awaited_once_with(
+        mock_update.callback_query.message,
+        mock_context,
+        'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+    )
 
 
 @pytest.mark.asyncio
-async def test_ask_format_with_youtube_playlist_shows_playlist_options(mock_update, mock_context):
+async def test_ask_format_with_youtube_playlist_starts_prefetch_and_shows_format_buttons(mock_update, mock_context):
     mock_update.message.text = "https://www.youtube.com/playlist?list=PL123"
-    status_message = mock_update.message.reply_text.return_value
-
-    with patch(
-        'bot_handlers.asyncio.to_thread',
-        new=AsyncMock(return_value={
-            'title': 'My Playlist',
-            'entries': [{'id': '1'}, {'id': '2'}]
-        })
-    ):
+    with patch('bot_handlers.start_youtube_download_options_prefetch') as mock_prefetch:
         await ask_format(mock_update, mock_context)
 
-    status_message.edit_text.assert_called_once()
-    assert "ההגדרה שתיבחר תחול אוטומטית על כל הסרטונים בפלייליסט" in status_message.edit_text.call_args[0][0]
-    assert isinstance(status_message.edit_text.call_args[1]['reply_markup'], InlineKeyboardMarkup)
+    mock_update.message.reply_text.assert_called_once()
+    assert "מה תרצה להוריד?" in mock_update.message.reply_text.call_args[0][0]
+    assert isinstance(mock_update.message.reply_text.call_args[1]['reply_markup'], InlineKeyboardMarkup)
+    mock_prefetch.assert_called_once_with(
+        mock_context,
+        "https://www.youtube.com/playlist?list=PL123"
+    )
 
 
 @pytest.mark.asyncio
@@ -324,6 +296,8 @@ async def test_button_click_cancel_clears_download_state(mock_update, mock_conte
     mock_context.user_data = {
         'current_url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
         'youtube_download_options': [build_youtube_quality_option(720)],
+        'youtube_prefetch_task': AsyncMock(),
+        'youtube_prefetch_url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
         'current_quality_index': 0,
         'download_mode': 'video',
         'is_youtube': True,
