@@ -139,8 +139,8 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if is_youtube:
             status_message = await message.reply_text(
-                'מה תרצה להוריד?\n'
-                'אפשר לבחור כבר עכשיו. בינתיים בודק איכויות וידאו זמינות ברקע... ⏳',
+                'מה להוריד לך? נא לבחור\n'
+                '(איכויות הווידאו נבדקות ברקע...)',
                 reply_markup=build_format_keyboard()
             )
             prefetch_task = start_youtube_download_options_prefetch(context, url)
@@ -277,8 +277,8 @@ async def notify_youtube_prefetch_ready(context, url, message, task):
 
     try:
         await message.edit_text(
-            'מה תרצה להוריד?\n'
-            'אפשר לבחור כבר עכשיו. איכויות הווידאו זמינות.',
+            'מה להוריד לך? נא לבחור\n'
+            '(איכויות הווידאו מוכנות לבחירה.)',
             reply_markup=build_format_keyboard()
         )
     except Exception as e:
