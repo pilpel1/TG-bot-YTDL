@@ -97,6 +97,27 @@ def sanitize_filename(filename):
     return filename
 
 
+def is_youtube_mix_url(url):
+    """בודק אם זה קישור למיקס של יוטיוב (list=RD...)."""
+    if not url:
+        return False
+    return bool(re.search(r'[?&]list=RD', url))
+
+
+def is_youtube_playlist_url(url):
+    """בודק אם יש פרמטר list= בקישור - כולל גם מיקסים (RD) וגם פלייליסטים רגילים
+    (PL/UU/OLAK5uy/FL וכו')."""
+    if not url:
+        return False
+    return bool(re.search(r'[?&]list=', url))
+
+
+def count_playlist_entries(playlist_info):
+    """סופר entries תקפים בתוצאת extract_flat של yt-dlp."""
+    entries = (playlist_info or {}).get('entries') or []
+    return sum(1 for entry in entries if entry is not None)
+
+
 def build_youtube_quality_option(height):
     """בונה אפשרות איכות דינמית לפי רזולוציה."""
     return {
@@ -194,8 +215,17 @@ def fetch_youtube_quality_options(url):
     ]
 
 
-def fetch_youtube_basic_info(url):
-    """שולף metadata בסיסי מיוטיוב כדי לזהות סרטון יחיד מול פלייליסט."""
+def fetch_youtube_basic_info(url, playlistend=None):
+    """שולף metadata בסיסי מיוטיוב כדי לזהות סרטון יחיד מול פלייליסט.
+
+    playlistend מגביל כמה entries yt-dlp יחלץ - שימושי למיקסים גדולים
+    (מאות סרטונים) כדי לא לחכות דקה שלמה רק בשביל לזהות שזה מיקס.
+
+    קישור מהצורה watch?v=X&list=PLxxx (הצורה שמעתיקים בפועל מתוך תצוגת
+    פלייליסט) לא מחזיר entries בכלל עם extract_flat - yt-dlp מחזיר רק
+    "stub" הפניה (_type='url') לכתובת הפלייליסט הקנונית (playlist?list=PLxxx),
+    בלי לעקוב אחריה. מיקסים (list=RD) לא סובלים מזה - הם מוחזרים ישירות
+    כ-playlist עם entries. לכן: עוקבים פעם אחת אחרי ההפניה הזו במקרה הצורך."""
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
@@ -203,9 +233,22 @@ def fetch_youtube_basic_info(url):
         'noplaylist': False,
         'socket_timeout': 30,
     }
+    if playlistend:
+        ydl_opts['playlistend'] = playlistend
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        return ydl.extract_info(url, download=False)
+        info = ydl.extract_info(url, download=False)
+
+        if (
+            info
+            and 'entries' not in info
+            and info.get('_type') in ('url', 'url_transparent')
+            and info.get('url')
+            and info['url'] != url
+        ):
+            info = ydl.extract_info(info['url'], download=False)
+
+        return info
 
 
 def fetch_format_info(url, format_selector):

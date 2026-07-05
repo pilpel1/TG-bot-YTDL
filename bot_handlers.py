@@ -1,14 +1,24 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from logger_setup import logger
-from config import YOUTUBE_QUALITY_LEVELS, DEFAULT_FORMAT, VERSION, CHANGELOG, MAX_FILE_SIZE
-from download_manager import download_with_quality
+from config import (
+    YOUTUBE_QUALITY_LEVELS,
+    DEFAULT_FORMAT,
+    VERSION,
+    CHANGELOG,
+    MAX_FILE_SIZE,
+    MAX_MIX_DOWNLOAD_LIMIT,
+)
+from download_manager import download_with_quality, download_playlist
 from utils import (
     fetch_youtube_download_options,
     build_youtube_audio_option,
     get_best_allowed_quality_name,
     fetch_youtube_basic_info,
     build_youtube_playlist_download_options,
+    is_youtube_mix_url,
+    is_youtube_playlist_url,
+    count_playlist_entries,
 )
 import asyncio
 import random
@@ -29,6 +39,13 @@ SUPPORTED_SITES_MESSAGE = (
 )
 VERSIONS_URL = "https://github.com/pilpel1/TG-bot-YTDL/blob/main/VERSIONS.md"
 
+# מגביל כמה entries נשלפים בזיהוי הראשוני של פלייליסט/מיקס.
+# למיקס אין "סוף" אמיתי אז אין טעם לחלץ הכל. לפלייליסט רגיל זה לא פוגע
+# בדיוק המספר הכולל - yt-dlp מחזיר playlist_count מדויק גם עם הגבלה כזו
+# (מגיע ממטא-דטה של הדף הראשי, לא מספירת entries בפועל).
+# 20 נותן שוליים מעל האופציה הכי גדולה בכפתורים (15) בלי לחכות לרשת יותר מדי.
+PLAYLIST_METADATA_ENTRIES_CAP = 20
+
 
 def clear_download_state(context):
     """מנקה את מצב ההורדה הנוכחי של המשתמש."""
@@ -42,6 +59,10 @@ def clear_download_state(context):
         'current_quality_index',
         'download_mode',
         'is_youtube',
+        'pending_batch_quality',
+        'pending_batch_quality_levels',
+        'is_batch_mix',
+        'batch_playlist_info',
     ]:
         context.user_data.pop(key, None)
 
@@ -191,21 +212,68 @@ def build_format_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
+def build_batch_count_keyboard(entries_count=0, is_mix=True):
+    """בונה מקלדת לבחירת כמות סרטונים להורדה מפלייליסט/מיקס יוטיוב.
+    אם entries_count לא ידוע (0) - מציג ברירת מחדל של 5/10/15 בלי לחכות לרשת.
+
+    מיקס נבנה דינמית ואינסופית ע"י יוטיוב - אין באמת "סוף" ידוע, ולכן אין
+    כפתור "הכל"; יש תקרה קשיחה (MAX_MIX_DOWNLOAD_LIMIT) במקום.
+    פלייליסט רגיל הוא סופי אמיתי, אז "הכל" הוא ערך מדויק וידוע ומוצג עם
+    המספר (playlist_count)."""
+    suggested = [count for count in (5, 10, 15) if entries_count == 0 or entries_count >= count]
+    keyboard = []
+    if suggested:
+        keyboard.append([
+            InlineKeyboardButton(f"{count} ראשונים", callback_data=f'batch_count_{count}')
+            for count in suggested
+        ])
+
+    if is_mix:
+        keyboard.append([
+            InlineKeyboardButton(
+                f'{MAX_MIX_DOWNLOAD_LIMIT} (מקסימום)',
+                callback_data=f'batch_count_{MAX_MIX_DOWNLOAD_LIMIT}'
+            )
+        ])
+    else:
+        all_label = f'כל הפלייליסט ({entries_count})' if entries_count else 'כל הפלייליסט'
+        keyboard.append([InlineKeyboardButton(all_label, callback_data='batch_count_all')])
+
+    keyboard.append([InlineKeyboardButton("❌ ביטול", callback_data='cancel')])
+    return InlineKeyboardMarkup(keyboard)
+
+
 def build_fallback_youtube_download_options():
     """אפשרויות fallback כלליות אם חילוץ ה-metadata נכשל."""
     return [quality.copy() for quality in YOUTUBE_QUALITY_LEVELS]
 
 
-def build_playlist_prompt(playlist_info):
-    """בונה הודעת בחירה לפלייליסט יוטיוב."""
-    title = (playlist_info or {}).get('title') or 'הפלייליסט'
-    entries = (playlist_info or {}).get('entries') or []
-    total_videos = len([entry for entry in entries if entry is not None])
+def build_playlist_prompt(playlist_info, is_mix=False):
+    """בונה הודעת בחירה לפלייליסט/מיקס יוטיוב.
+
+    למיקס לא מציגים מספר סרטונים כאן - יוטיוב לא חושף מונה כולל למיקסים
+    (הם נבנים דינמית), והמספר המתאים (מוגבל/משוער) מוצג בהמשך במסך
+    "כמה להוריד" (maybe_prompt_batch_count).
+    לפלייליסט רגיל יש playlist_count מדויק שמגיע ממטא-דטה בלי תלות
+    בכמה entries בפועל נשלפו, אז אפשר להציג אותו כאן בביטחון."""
+    title = (playlist_info or {}).get('title') or ('המיקס' if is_mix else 'הפלייליסט')
+
+    if is_mix:
+        return (
+            f'זיהיתי מיקס יוטיוב: {title}\n\n'
+            'ההגדרה שתיבחר תחול על הסרטונים שתבחר להוריד מהמיקס.\n'
+            'גודל הקובץ ייבדק מאחורי הקלעים עבור כל סרטון, '
+            'וסרטונים גדולים מדי או בעייתיים יידלגו.\n\n'
+            'מה להוריד מהמיקס?'
+        )
+
+    total_videos = (playlist_info or {}).get('playlist_count')
+    count_line = f'מספר סרטונים: {total_videos}\n\n' if total_videos else '\n'
 
     return (
         f'זיהיתי פלייליסט: {title}\n'
-        f'מספר סרטונים: {total_videos}\n\n'
-        'ההגדרה שתיבחר תחול אוטומטית על כל הסרטונים בפלייליסט.\n'
+        f'{count_line}'
+        'ההגדרה שתיבחר תחול על הסרטונים שתבחר להוריד מהפלייליסט.\n'
         'גודל הקובץ ייבדק מאחורי הקלעים עבור כל סרטון, '
         'וסרטונים גדולים מדי או בעייתיים יידלגו.\n\n'
         'מה להוריד מהפלייליסט?'
@@ -215,16 +283,27 @@ def build_playlist_prompt(playlist_info):
 async def prefetch_youtube_download_options(url):
     """שולף ברקע metadata ואפשרויות הורדה ליוטיוב."""
     playlist_info = None
+    is_mix = is_youtube_mix_url(url)
 
     try:
-        playlist_info = await asyncio.to_thread(fetch_youtube_basic_info, url)
+        # מגביל תמיד ל-PLAYLIST_METADATA_ENTRIES_CAP - מהיר גם למיקסים גדולים
+        # וגם לפלייליסטים גדולים, ולא פוגע בדיוק playlist_count לפלייליסט רגיל.
+        playlist_info = await asyncio.to_thread(
+            fetch_youtube_basic_info, url, PLAYLIST_METADATA_ENTRIES_CAP
+        )
     except Exception as e:
         logger.warning(f"Could not fetch basic YouTube info: {e}")
 
     if playlist_info and 'entries' in playlist_info:
+        total_count = playlist_info.get('playlist_count')
+        capped_count = count_playlist_entries(playlist_info)
         return {
             'download_options': build_youtube_playlist_download_options(),
-            'prompt': build_playlist_prompt(playlist_info)
+            'prompt': build_playlist_prompt(playlist_info, is_mix=is_mix),
+            'is_mix': is_mix,
+            'is_batch': True,
+            'batch_entries_count': total_count if total_count else capped_count,
+            'playlist_info': playlist_info,
         }
 
     download_options = []
@@ -296,6 +375,53 @@ async def get_youtube_download_options_result(context, url):
     return await prefetch_youtube_download_options(url)
 
 
+async def maybe_prompt_batch_count(message, context, url, selected_option, quality_levels):
+    """אם ה-URL הוא פלייליסט או מיקס - שואל את המשתמש כמה סרטונים להוריד.
+    מחזיר True אם נשאל, False אם זה בעצם לא פלייליסט/מיקס תקין (ואז ממשיכים
+    בזרימה הרגילה של סרטון בודד).
+
+    הזיהוי הראשוני "יש list= בקישור" הוא regex מיידי בלי רשת - כדי לא לפגוע
+    בתגובתיות של הרוב המכריע (סרטונים רגילים בלי list=). רק כשהוא חיובי שווה
+    להמתין (מוגבל בזכות PLAYLIST_METADATA_ENTRIES_CAP - כמה שניות) לתוצאת
+    הזיהוי המדויקת: גם כדי להציג מספר נכון, וגם כי בלי זה יש race - לחיצה
+    מהירה על אודיו/וידאו הייתה מקבלת "לא ידוע" תמיד כי ה-prefetch שרץ ברקע
+    עוד לא הספיק לסיים."""
+    if not is_youtube_playlist_url(url):
+        return False
+
+    prefetched_result = await get_youtube_download_options_result(context, url)
+
+    if not prefetched_result.get('is_batch'):
+        return False
+
+    is_mix = prefetched_result.get('is_mix', False)
+    entries_count = prefetched_result.get('batch_entries_count', 0)
+
+    context.user_data['pending_batch_quality'] = selected_option
+    context.user_data['pending_batch_quality_levels'] = quality_levels
+    context.user_data['is_batch_mix'] = is_mix
+    context.user_data['batch_playlist_info'] = prefetched_result.get('playlist_info')
+
+    if is_mix:
+        entries_count_label = (
+            f'{entries_count}+' if entries_count >= PLAYLIST_METADATA_ENTRIES_CAP else str(entries_count)
+        )
+        prompt = (
+            f'זיהיתי מיקס יוטיוב עם {entries_count_label} סרטונים זמינים לחילוץ.\nכמה להוריד?'
+            if entries_count > 0
+            else 'זיהיתי מיקס יוטיוב 🎵\nכמה להוריד?'
+        )
+    else:
+        prompt = (
+            f'זיהיתי פלייליסט עם {entries_count} סרטונים.\nכמה להוריד?'
+            if entries_count > 0
+            else 'זיהיתי פלייליסט יוטיוב 📃\nכמה להוריד?'
+        )
+
+    await message.edit_text(prompt, reply_markup=build_batch_count_keyboard(entries_count, is_mix=is_mix))
+    return True
+
+
 async def show_youtube_download_options(message, context, url):
     """מציג את אפשרויות הווידאו ליוטיוב אחרי לחיצה על וידאו."""
     prefetch_task = context.user_data.get('youtube_prefetch_task')
@@ -310,8 +436,10 @@ async def show_youtube_download_options(message, context, url):
     prompt = prefetched_result['prompt']
 
     context.user_data['youtube_download_options'] = download_options
-    context.user_data.pop('youtube_prefetch_task', None)
-    context.user_data.pop('youtube_prefetch_url', None)
+    # לא מוחקים את youtube_prefetch_task/url כאן! עדיין צריך אותם בהמשך -
+    # אחרי שהמשתמש יבחר איכות, maybe_prompt_batch_count תלוי בהם כדי לדעת
+    # כמה סרטונים יש בפלייליסט/מיקס בלי לחכות לרשת מחדש. הם יימחקו במקום
+    # המתאים (batch_count_/quality_/cancel) כשבאמת אין בהם צורך יותר.
     reply_markup = build_quality_keyboard(download_options)
     await message.edit_text(prompt, reply_markup=reply_markup)
 
@@ -323,7 +451,79 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer('בוטל')
         await query.message.edit_text('בוטל. אפשר לשלוח קישור חדש.')
         return
-    
+
+    if query.data.startswith('batch_count_'):
+        count_suffix = query.data[len('batch_count_'):]
+        if count_suffix == 'all':
+            playlist_limit = None
+        else:
+            try:
+                playlist_limit = int(count_suffix)
+            except ValueError:
+                await query.answer('בחירה לא תקפה')
+                return
+
+        url = context.user_data.get('current_url')
+        selected_option = context.user_data.get('pending_batch_quality')
+        quality_levels = context.user_data.get('pending_batch_quality_levels')
+        is_mix = context.user_data.get('is_batch_mix', False)
+
+        if not url or not selected_option:
+            await query.answer()
+            await query.message.edit_text('משהו השתבש, אנא שלח את הקישור שוב.')
+            return
+
+        download_mode = selected_option.get('download_mode') or context.user_data.get('download_mode')
+
+        # ל-maybe_prompt_batch_count כבר יש playlist_info מהזיהוי המדויק (היא
+        # ממתינה לו) - נשתמש בו כדי לא לחלץ שוב את כל הפלייליסט/מיקס מאפס.
+        # הוא מוגבל בכוונה ל-PLAYLIST_METADATA_ENTRIES_CAP entries (זיהוי מהיר)
+        # - שמיש רק אם באמת יש בו מספיק בשביל הבחירה הנוכחית. אחרת (למשל
+        # "הכל" בפלייליסט, או "100" במיקס גדול מ-20 שכבר נשלפו) - חובה לחלץ
+        # מחדש עם הגבלה מתאימה, כדי שלא יורידו פחות ממה שהמשתמש בחר.
+        cached_playlist_info_candidate = context.user_data.get('batch_playlist_info')
+        cached_entries_available = (
+            count_playlist_entries(cached_playlist_info_candidate)
+            if cached_playlist_info_candidate else 0
+        )
+        cache_is_sufficient = (
+            cached_playlist_info_candidate is not None
+            and playlist_limit is not None
+            and (
+                cached_entries_available >= playlist_limit
+                or cached_entries_available < PLAYLIST_METADATA_ENTRIES_CAP
+            )
+        )
+        cached_playlist_info = cached_playlist_info_candidate if cache_is_sufficient else None
+
+        await query.answer()
+        context.user_data.pop('youtube_prefetch_task', None)
+        context.user_data.pop('youtube_prefetch_url', None)
+        context.user_data.pop('pending_batch_quality', None)
+        context.user_data.pop('pending_batch_quality_levels', None)
+        context.user_data.pop('is_batch_mix', None)
+        context.user_data.pop('batch_playlist_info', None)
+
+        batch_label = 'המיקס' if is_mix else 'הפלייליסט'
+        status_text = (
+            f'מתחיל להוריד {playlist_limit} סרטונים מ{batch_label}... ⏳'
+            if playlist_limit
+            else f'מתחיל להוריד את כל {batch_label}... ⏳'
+        )
+        status_message = await query.message.edit_text(status_text)
+        # קריאה ישירה ל-download_playlist (ולא download_with_quality) כי כבר ידוע
+        # בוודאות שזה פלייליסט/מיקס - כך נחסך שלב בדיקה חוזר שמחלץ הכל מאפס.
+        await download_playlist(
+            context,
+            status_message,
+            url,
+            download_mode,
+            selected_option,
+            playlist_info=cached_playlist_info,
+            playlist_limit=playlist_limit,
+        )
+        return
+
     if query.data.startswith('quality_'):
         # טיפול בבחירת איכות
         quality_index = int(query.data.split('_')[1])
@@ -352,8 +552,16 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.answer()
         context.user_data['current_quality_index'] = quality_index
+
+        if context.user_data.get('is_youtube') and await maybe_prompt_batch_count(
+            query.message, context, url, selected_option, quality_options
+        ):
+            return
+
+        context.user_data.pop('youtube_prefetch_task', None)
+        context.user_data.pop('youtube_prefetch_url', None)
         status_message = await query.message.edit_text('מתחיל בהורדה... ⏳')
-        
+
         await download_with_quality(
             context,
             status_message,
@@ -372,14 +580,21 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         is_youtube = context.user_data.get('is_youtube', False)
         
         if download_mode == 'audio':
+            quality = build_youtube_audio_option() if is_youtube else DEFAULT_FORMAT
+            current_url = context.user_data.get('current_url')
+
+            if is_youtube and await maybe_prompt_batch_count(
+                query.message, context, current_url, quality, None
+            ):
+                return
+
             context.user_data.pop('youtube_prefetch_task', None)
             context.user_data.pop('youtube_prefetch_url', None)
             status_message = await query.message.edit_text('מתחיל בהורדה... ⏳')
-            quality = build_youtube_audio_option() if is_youtube else DEFAULT_FORMAT
             await download_with_quality(
                 context,
                 status_message,
-                context.user_data.get('current_url'),
+                current_url,
                 download_mode,
                 quality,
                 context.user_data.get('youtube_download_options') if is_youtube else None

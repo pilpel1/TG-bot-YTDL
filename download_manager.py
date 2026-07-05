@@ -112,7 +112,7 @@ def build_youtube_video_fallback_formats(requested_height):
 
     return deduped_formats
 
-async def download_playlist(context, status_message, url, download_mode, quality, playlist_info=None):
+async def download_playlist(context, status_message, url, download_mode, quality, playlist_info=None, playlist_limit=None):
     """הורדת פלייליסט"""
     try:
         format_spec = quality['format']
@@ -153,12 +153,30 @@ async def download_playlist(context, status_message, url, download_mode, quality
             'socket_timeout': 30,
             'outtmpl_na_placeholder': 'unknown_title',  # שם ברירת מחדל אם אין כותרת
         }
-        
+
+        # אם עדיין צריך לחלץ (אין playlist_info מ-cache) ויש הגבלת כמות -
+        # אומרים ל-yt-dlp להפסיק לחלץ אחרי N פריטים במקום "לטייל" על כל המיקס/פלייליסט.
+        # חוסך המתנה ארוכה במיקסים גדולים (מאות פריטים) כשנבחרו רק 5/10/15.
+        if playlist_info is None and playlist_limit:
+            ydl_opts['playlistend'] = playlist_limit
+
         # קבלת מידע על הפלייליסט
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             logger.info("Extracting playlist info...")
             result = playlist_info or ydl.extract_info(url, download=False)
-            
+
+            # קישור מהצורה watch?v=X&list=PLxxx לא מחזיר entries עם extract_flat -
+            # yt-dlp מחזיר רק "stub" הפניה (_type='url') לכתובת הפלייליסט הקנונית.
+            # עוקבים אחריה פעם אחת כדי לקבל את ה-entries האמיתיים.
+            if (
+                result
+                and 'entries' not in result
+                and result.get('_type') in ('url', 'url_transparent')
+                and result.get('url')
+                and result['url'] != url
+            ):
+                result = ydl.extract_info(result['url'], download=False)
+
             if not result:
                 raise Exception("Could not extract playlist info")
             
@@ -169,12 +187,22 @@ async def download_playlist(context, status_message, url, download_mode, quality
                 logger.error("No valid entries found in playlist")
                 await safe_edit_message(status_message, 'לא מצאתי סרטונים תקינים בפלייליסט 😕')
                 return
-            
+
+            total_available = len(entries)
+            if playlist_limit and playlist_limit < total_available:
+                entries = entries[:playlist_limit]
+                logger.info(
+                    f"Limiting playlist download to first {playlist_limit} of {total_available} videos"
+                )
+
             total_videos = len(entries)
             logger.info(f"Found {total_videos} valid videos in playlist")
-            progress_message = await status_message.reply_text(
-                f'מצאתי {total_videos} סרטונים בפלייליסט. מתחיל להוריד... ⏳'
+            progress_intro = (
+                f'מתחיל להוריד את {total_videos} הסרטונים הראשונים מהמיקס (מתוך {total_available}) ⏳'
+                if playlist_limit and total_available > total_videos
+                else f'מצאתי {total_videos} סרטונים בפלייליסט. מתחיל להוריד... ⏳'
             )
+            progress_message = await status_message.reply_text(progress_intro)
             
             successful_downloads = 0
             error_videos = 0
@@ -244,7 +272,7 @@ async def download_playlist(context, status_message, url, download_mode, quality
         logger.error(f"Critical error during playlist download: {error_msg}")
         await safe_edit_message(status_message, 'משהו השתבש בהורדת הפלייליסט 😕')
 
-async def download_with_quality(context, status_message, url, download_mode, quality, quality_levels, is_playlist=False):
+async def download_with_quality(context, status_message, url, download_mode, quality, quality_levels, is_playlist=False, playlist_limit=None):
     """הורדת קובץ באיכות ספציפית"""
     current_file = None
     thumbnail_file = None
@@ -266,12 +294,28 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                         pre_check_opts['cookiefile'] = str(cookies_path)
                 with yt_dlp.YoutubeDL(pre_check_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
+
+                    # קישור מהצורה watch?v=X&list=PLxxx לא מחזיר entries עם
+                    # extract_flat - רק "stub" הפניה (_type='url') לכתובת
+                    # הפלייליסט הקנונית. עוקבים אחריה כדי לא לפספס שזה פלייליסט.
+                    if (
+                        info
+                        and 'entries' not in info
+                        and info.get('_type') in ('url', 'url_transparent')
+                        and info.get('url')
+                        and info['url'] != url
+                    ):
+                        info = ydl.extract_info(info['url'], download=False)
+
                     # בדיקת תוכן מוגבל
                     if info.get('age_limit', 0) > 0 or info.get('content_warning'):
                         raise Exception("Sign in to confirm your age")
                     # בדיקת פלייליסט
                     if 'entries' in info:
-                        await download_playlist(context, status_message, url, download_mode, quality)
+                        await download_playlist(
+                            context, status_message, url, download_mode, quality,
+                            playlist_info=info, playlist_limit=playlist_limit
+                        )
                         return
             except Exception as e:
                 if "Sign in to confirm your age" in str(e):
