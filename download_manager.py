@@ -71,6 +71,19 @@ def extract_max_height_from_format(format_spec):
     return int(match.group(1)) if match else None
 
 
+def build_cancellation_progress_hook(should_cancel):
+    """בונה progress_hook ל-yt-dlp שבודק דגל ביטול ומעלה DownloadCancelled.
+
+    yt-dlp קורא ל-progress_hooks הרבה פעמים בשנייה תוך כדי כתיבת קובץ (לא
+    רק בסוף) - זו הדרך היחידה לעצור הורדה שכבר באמצע קובץ, כי ydl.download()
+    חוסם את ה-event loop וא-syncio.Task.cancel() לא תופס נקודת await שם.
+    """
+    def hook(progress_status):
+        if should_cancel and should_cancel():
+            raise yt_dlp.utils.DownloadCancelled('ההורדה בוטלה לבקשת המשתמש')
+    return hook
+
+
 def build_youtube_video_format(format_spec):
     """מחזיר selector ליוטיוב בהתאם לבחירת האיכות ולזמינות FFmpeg."""
     requested_height = extract_max_height_from_format(format_spec)
@@ -112,7 +125,8 @@ def build_youtube_video_fallback_formats(requested_height):
 
     return deduped_formats
 
-async def download_playlist(context, status_message, url, download_mode, quality, playlist_info=None, playlist_limit=None):
+async def download_playlist(context, status_message, url, download_mode, quality, playlist_info=None,
+                             playlist_limit=None, should_cancel=None):
     """הורדת פלייליסט"""
     try:
         format_spec = quality['format']
@@ -209,6 +223,10 @@ async def download_playlist(context, status_message, url, download_mode, quality
             
             # הורדת כל סרטון
             for index, entry in enumerate(entries, 1):
+                if should_cancel and should_cancel():
+                    logger.info("Playlist download cancelled by user between videos")
+                    break
+
                 current_file = None
                 try:
                     video_id = entry.get('id') or entry.get('url')
@@ -240,7 +258,8 @@ async def download_playlist(context, status_message, url, download_mode, quality
                         download_mode,
                         quality,
                         None,
-                        is_playlist=True
+                        is_playlist=True,
+                        should_cancel=should_cancel
                     )
                     
                     if download_result is False:
@@ -261,7 +280,10 @@ async def download_playlist(context, status_message, url, download_mode, quality
             except Exception:
                 pass
                 
-            summary = f'סיימתי! הורדתי {successful_downloads} מתוך {total_videos} סרטונים מהפלייליסט 🎉'
+            if should_cancel and should_cancel():
+                summary = f'ההורדה בוטלה 🛑 הספקתי להוריד {successful_downloads} מתוך {total_videos} סרטונים'
+            else:
+                summary = f'סיימתי! הורדתי {successful_downloads} מתוך {total_videos} סרטונים מהפלייליסט 🎉'
             if error_videos > 0:
                 summary += f' ({error_videos} לא זמינים)'
             logger.info(f"Playlist download completed. Success: {successful_downloads}, Errors: {error_videos}")
@@ -272,11 +294,15 @@ async def download_playlist(context, status_message, url, download_mode, quality
         logger.error(f"Critical error during playlist download: {error_msg}")
         await safe_edit_message(status_message, 'משהו השתבש בהורדת הפלייליסט 😕')
 
-async def download_with_quality(context, status_message, url, download_mode, quality, quality_levels, is_playlist=False, playlist_limit=None):
+async def download_with_quality(context, status_message, url, download_mode, quality, quality_levels,
+                                 is_playlist=False, playlist_limit=None, should_cancel=None):
     """הורדת קובץ באיכות ספציפית"""
     current_file = None
     thumbnail_file = None
-    
+
+    if should_cancel and should_cancel():
+        return False
+
     try:
         # המרת קישורי X לטוויטר בתחילת התהליך
         if 'x.com' in url:
@@ -314,7 +340,8 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     if 'entries' in info:
                         await download_playlist(
                             context, status_message, url, download_mode, quality,
-                            playlist_info=info, playlist_limit=playlist_limit
+                            playlist_info=info, playlist_limit=playlist_limit,
+                            should_cancel=should_cancel
                         )
                         return
             except Exception as e:
@@ -392,7 +419,10 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             'socket_timeout': 120,
             'outtmpl': '%(id)s.%(ext)s',
             'outtmpl_na_placeholder': 'unknown_title',
-            'progress_hooks': [],
+            # מוסיפים כאן (ולא אחרי copy()) כדי שכל ה-ydl_opts הנגזרים
+            # (preflight, fallback retries) יחזיקו את אותו list ע"י reference
+            # ויקבלו את בדיקת הביטול גם הם.
+            'progress_hooks': [build_cancellation_progress_hook(should_cancel)],
             'outtmpl_func': custom_filename,
             'paths': {'home': str(DOWNLOADS_DIR)},
             'writesubtitles': False,
@@ -647,7 +677,11 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                 if info:
                                     logger.info(f"Success with format: {fallback_format}")
                                     break
-                                    
+
+                        except yt_dlp.utils.DownloadCancelled:
+                            # לא "הפורמט הזה נכשל, ננסה הבא" - זה ביטול אמיתי,
+                            # צריך להתפשט החוצה ולא להמשיך לנסות עוד פורמטים.
+                            raise
                         except Exception as retry_error:
                             logger.warning(f"Format {fallback_format} failed: {str(retry_error)}")
                             continue
@@ -811,7 +845,13 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                         f'הקובץ גדול מדי ({size_mb:.1f}MB). מגבלה מקסימלית: {max_size_display}. נסה באיכות נמוכה יותר.'
                     )
                 return False
-    
+
+    except yt_dlp.utils.DownloadCancelled:
+        logger.info(f"Download cancelled by user: {url}")
+        if not is_playlist:
+            await replace_status_message(status_message, 'ההורדה בוטלה 🛑')
+        return False
+
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error during download: {error_msg}")

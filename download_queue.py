@@ -18,6 +18,23 @@ DEFAULT_SECONDS_PER_UNIT = 12
 MIN_DISPLAYED_ETA_SECONDS = 5
 
 
+class CancellationToken:
+    """דגל ביטול פשוט המשותף בין ה-handler שמכין את ההורדה (בונה את
+    coro_factory), ה-DownloadQueue, ובתוך download_manager עצמו (נבדק
+    מתוך progress_hook של yt-dlp). לא צריך threading.Event - כל הצדדים
+    רצים על אותו thread יחיד של ה-event loop, כולל ה-progress_hook
+    הסינכרוני של yt-dlp שנקרא מתוך אותו task."""
+
+    def __init__(self):
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def is_cancelled(self) -> bool:
+        return self._cancelled
+
+
 @dataclass
 class QueuedJob:
     job_id: str
@@ -25,6 +42,7 @@ class QueuedJob:
     status_message: object
     coro_factory: Callable[[], Awaitable]
     weight: int = 1
+    cancel_token: CancellationToken = field(default_factory=CancellationToken)
     task: Optional[asyncio.Task] = None
     position_updater: Optional[asyncio.Task] = None
     enqueued_at: float = field(default_factory=time.monotonic)
@@ -76,7 +94,8 @@ class DownloadQueue:
             pass
         self._worker_task = None
 
-    async def enqueue(self, chat_id, status_message, coro_factory, weight: int = 1) -> str:
+    async def enqueue(self, chat_id, status_message, coro_factory, weight: int = 1,
+                       cancel_token: Optional[CancellationToken] = None) -> str:
         """מכניס ג'וב לתור ומחזיר מיד (לא מחכה לביצוע בפועל).
 
         coro_factory: פונקציה בלי ארגומנטים שמחזירה coroutine (לא coroutine
@@ -84,6 +103,11 @@ class DownloadQueue:
 
         weight: "יחידות עבודה" משוערות בג'וב הזה (1 לסרטון בודד, N לפלייליסט
         של N סרטונים) - משמש רק להערכת זמן, לא משפיע על סדר העיבוד (FIFO).
+
+        cancel_token: אותו טוקן שהמזמין (coro_factory) כבר מעביר פנימה
+        ל-download_with_quality/download_playlist כ-should_cancel. אם לא
+        סופק, נוצר טוקן חדש - אז cancel() עדיין "עובד" אך בלי אפקט בפועל
+        על ההורדה עצמה (רק מסמן/מסיר מהתור).
         """
         self._job_counter += 1
         job_id = f"{chat_id}-{self._job_counter}-{int(time.time() * 1000)}"
@@ -93,6 +117,7 @@ class DownloadQueue:
             status_message=status_message,
             coro_factory=coro_factory,
             weight=max(1, weight),
+            cancel_token=cancel_token or CancellationToken(),
         )
         self._jobs[job_id] = job
 
@@ -107,10 +132,17 @@ class DownloadQueue:
 
     def cancel(self, job_id: str) -> bool:
         """מבטל ג'וב - גם אם עדיין ממתין בתור וגם אם כבר רץ.
-        מוחזר לשימוש עתידי (למשל פקודת /stop)."""
+
+        לג'וב שכבר רץ בפועל: מסמנים את cancel_token (נבדק מתוך progress_hook
+        סינכרוני בתוך yt-dlp - זה מה שבאמת עוצר הורדה שנמצאת באמצע קובץ,
+        כי ydl.download() חוסם את ה-event loop ואין נקודת await לתפוס שם
+        Task.cancel()) וגם קוראים ל-task.cancel() (תופס נקודות await
+        אמיתיות, למשל בין סרטון לסרטון בפלייליסט)."""
         job = self._jobs.get(job_id)
         if not job:
             return False
+
+        job.cancel_token.cancel()
 
         if job.task and not job.task.done():
             job.task.cancel()
@@ -122,7 +154,7 @@ class DownloadQueue:
         return True
 
     def get_job_id_for_chat(self, chat_id) -> Optional[str]:
-        """מוצא ג'וב פעיל/ממתין עבור chat_id נתון. שימוש עתידי (/stop)."""
+        """מוצא ג'וב פעיל/ממתין עבור chat_id נתון - משמש את פקודת /stop."""
         for job_id, job in self._jobs.items():
             if job.chat_id == chat_id:
                 return job_id

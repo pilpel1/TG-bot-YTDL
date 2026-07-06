@@ -1,16 +1,19 @@
 import pytest
+import yt_dlp
 from unittest.mock import AsyncMock, MagicMock, patch
 from telegram import Update, Message, Chat, User, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from bot_handlers import (
     is_valid_url, is_preferred_platform, is_thank_you_message,
-    start, ask_format, button_click, handle_thank_you
+    start, ask_format, button_click, handle_thank_you, stop_download
 )
 from config import YOUTUBE_QUALITY_LEVELS
 from download_manager import (
     extract_max_height_from_format,
     build_youtube_video_format,
     build_youtube_video_fallback_formats,
+    build_cancellation_progress_hook,
+    download_with_quality,
 )
 from utils import (
     extract_available_youtube_heights,
@@ -429,4 +432,64 @@ async def test_thank_you_handler(mock_update, mock_context):
     assert any(resp in response for resp in [
         "בכיף!", "שמח לעזור!", "אין בעד מה!",
         "תהנה/י!", "לשירותך!", "בשמחה!"
-    ]) 
+    ])
+
+# Cancellation Tests
+def test_cancellation_progress_hook_raises_when_should_cancel_true():
+    hook = build_cancellation_progress_hook(lambda: True)
+    with pytest.raises(yt_dlp.utils.DownloadCancelled):
+        hook({'status': 'downloading'})
+
+def test_cancellation_progress_hook_does_nothing_when_should_cancel_false():
+    hook = build_cancellation_progress_hook(lambda: False)
+    hook({'status': 'downloading'})  # לא אמור לזרוק שום דבר
+
+def test_cancellation_progress_hook_does_nothing_when_should_cancel_none():
+    hook = build_cancellation_progress_hook(None)
+    hook({'status': 'downloading'})  # לא אמור לזרוק שום דבר
+
+@pytest.mark.asyncio
+async def test_download_with_quality_returns_immediately_when_already_cancelled(mock_context):
+    """אם בוטל עוד לפני שהג'וב באמת התחיל לרוץ (למשל בזמן שהיה בתור) -
+    אין טעם לפתוח בכלל חיבור ל-yt-dlp."""
+    status_message = MagicMock()
+    status_message.edit_text = AsyncMock()
+
+    result = await download_with_quality(
+        mock_context, status_message, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        'video', {'format': 'best', 'quality_name': 'איכות רגילה'}, None,
+        should_cancel=lambda: True
+    )
+
+    assert result is False
+    status_message.edit_text.assert_not_called()
+
+# Stop Command Tests
+@pytest.mark.asyncio
+async def test_stop_download_with_no_queue_initialized(mock_update, mock_context):
+    mock_context.bot_data = {}
+    await stop_download(mock_update, mock_context)
+    mock_update.message.reply_text.assert_called_once_with('אין תור הורדות פעיל כרגע.')
+
+@pytest.mark.asyncio
+async def test_stop_download_with_no_active_job(mock_update, mock_context):
+    mock_download_queue = MagicMock()
+    mock_download_queue.get_job_id_for_chat.return_value = None
+    mock_context.bot_data = {'download_queue': mock_download_queue}
+
+    await stop_download(mock_update, mock_context)
+
+    mock_download_queue.get_job_id_for_chat.assert_called_once_with(mock_update.effective_chat.id)
+    mock_download_queue.cancel.assert_not_called()
+    mock_update.message.reply_text.assert_called_once_with('אין לך הורדה פעילה או ממתינה כרגע 🤷')
+
+@pytest.mark.asyncio
+async def test_stop_download_cancels_active_job(mock_update, mock_context):
+    mock_download_queue = MagicMock()
+    mock_download_queue.get_job_id_for_chat.return_value = 'job-123'
+    mock_context.bot_data = {'download_queue': mock_download_queue}
+
+    await stop_download(mock_update, mock_context)
+
+    mock_download_queue.cancel.assert_called_once_with('job-123')
+    mock_update.message.reply_text.assert_called_once_with('ביטלתי את ההורדה 🛑')

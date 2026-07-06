@@ -76,7 +76,9 @@ FACEBOOK_COOKIES_FILE = Path(os.getenv('FACEBOOK_COOKIES_FILE', 'facebook_cookie
 MAX_MIX_DOWNLOAD_LIMIT = 100
 
 # Version info
-VERSION = "0.8.1"
-CHANGELOG = """🆕 גרסה 0.8.1:
-🔧 תיקון סגירה נקייה של הבוט
-• Ctrl+C כבר לא משאיר את worker התור "תלוי" עם שגיאות בלוגים בסגירה"""
+VERSION = "0.8.2"
+CHANGELOG = """🆕 גרסה 0.8.2:
+🛑 פקודת /stop - עוצרת הורדה פעילה, לא רק כפתורי בחירה
+• עוצרת גם הורדה שכבר באמצע קובץ, לא רק ג'ובים שממתינים בתור
+• בפלייליסט: עוצרת מיד את הזרימה בין סרטון לסרטון, ומראה כמה הספיקו לרדת
+• עובד גם דרך התערבות ב-yt-dlp עצמו (progress_hook), לא רק ביטול טכני של המשימה ברקע"""
