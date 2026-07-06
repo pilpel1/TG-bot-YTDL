@@ -4,8 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from telegram import Update, Message, Chat, User, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from bot_handlers import (
-    is_valid_url, is_preferred_platform, is_thank_you_message,
-    start, ask_format, button_click, handle_thank_you, stop_download
+    is_valid_url, is_preferred_platform, is_thank_you_message, is_searchable_text,
+    start, ask_format, button_click, handle_thank_you, stop_download,
+    build_search_results_keyboard,
 )
 from config import YOUTUBE_QUALITY_LEVELS
 from download_manager import (
@@ -23,6 +24,9 @@ from utils import (
     pick_best_youtube_audio_format,
     estimate_media_size,
     format_file_size,
+    search_youtube,
+    format_duration_short,
+    format_search_result_button_text,
 )
 
 # Fixtures
@@ -121,10 +125,140 @@ async def test_ask_format_with_valid_youtube_url(mock_update, mock_context):
 
 @pytest.mark.asyncio
 async def test_ask_format_with_invalid_url(mock_update, mock_context):
-    mock_update.message.text = "not_a_url"
+    mock_update.message.text = "x"
     await ask_format(mock_update, mock_context)
     mock_update.message.reply_text.assert_called_once()
-    assert "אנא שלח קישור תקין" in mock_update.message.reply_text.call_args[0][0]
+    assert "לא הצלחתי להבין" in mock_update.message.reply_text.call_args[0][0]
+
+@pytest.mark.asyncio
+async def test_ask_format_with_search_query(mock_update, mock_context):
+    mock_update.message.text = "חנן בן ארי תותים"
+    mock_results = [{
+        'id': 'abc123',
+        'title': 'תותים',
+        'uploader': 'חנן בן ארי',
+        'url': 'https://www.youtube.com/watch?v=abc123',
+        'duration': 245,
+    }]
+    with patch('bot_handlers.search_youtube', return_value=mock_results):
+        await ask_format(mock_update, mock_context)
+
+    assert mock_update.message.reply_text.call_count == 1
+    assert "מחפש ביוטיוב" in mock_update.message.reply_text.call_args[0][0]
+    status_message = mock_update.message.reply_text.return_value
+    status_message.edit_text.assert_awaited_once()
+    edit_args = status_message.edit_text.call_args
+    assert 'תוצאות חיפוש' in edit_args[0][0]
+    assert isinstance(edit_args[1]['reply_markup'], InlineKeyboardMarkup)
+    assert mock_context.user_data['youtube_search_results'] == mock_results
+
+@pytest.mark.asyncio
+async def test_ask_format_with_search_no_results_shows_generic_error(mock_update, mock_context):
+    mock_update.message.text = "xyzxyzxyz לא קיים"
+    with patch('bot_handlers.search_youtube', return_value=[]):
+        await ask_format(mock_update, mock_context)
+
+    status_message = mock_update.message.reply_text.return_value
+    status_message.edit_text.assert_awaited_once()
+    assert 'לא הצלחתי להבין' in status_message.edit_text.call_args[0][0]
+
+@pytest.mark.asyncio
+async def test_ask_format_with_too_long_text_skips_search(mock_update, mock_context):
+    mock_update.message.text = "א" * 101
+    with patch('bot_handlers.search_youtube') as mock_search:
+        await ask_format(mock_update, mock_context)
+
+    mock_search.assert_not_called()
+    assert "לא הצלחתי להבין" in mock_update.message.reply_text.call_args[0][0]
+
+@pytest.mark.asyncio
+async def test_ask_format_with_digits_only_skips_search(mock_update, mock_context):
+    mock_update.message.text = "12345"
+    with patch('bot_handlers.search_youtube') as mock_search:
+        await ask_format(mock_update, mock_context)
+
+    mock_search.assert_not_called()
+    assert "לא הצלחתי להבין" in mock_update.message.reply_text.call_args[0][0]
+
+@pytest.mark.asyncio
+async def test_button_click_search_pick_starts_youtube_flow(mock_update, mock_context):
+    mock_update.callback_query = AsyncMock()
+    mock_update.callback_query.data = "search_pick_0"
+    mock_update.callback_query.message = MagicMock()
+    mock_update.callback_query.message.edit_text = AsyncMock()
+    mock_context.user_data = {
+        'youtube_search_results': [{
+            'id': 'abc123',
+            'title': 'תותים',
+            'uploader': 'חנן בן ארי',
+            'url': 'https://www.youtube.com/watch?v=abc123',
+            'duration': 245,
+        }]
+    }
+
+    with patch('bot_handlers.start_youtube_download_options_prefetch') as mock_prefetch:
+        await button_click(mock_update, mock_context)
+
+    mock_update.callback_query.answer.assert_called_once()
+    mock_update.callback_query.message.edit_text.assert_called_once()
+    assert "מה להוריד לך?" in mock_update.callback_query.message.edit_text.call_args[0][0]
+    mock_prefetch.assert_called_once_with(
+        mock_context,
+        'https://www.youtube.com/watch?v=abc123'
+    )
+    assert mock_context.user_data['current_url'] == 'https://www.youtube.com/watch?v=abc123'
+    assert 'youtube_search_results' not in mock_context.user_data
+
+def test_is_searchable_text():
+    assert is_searchable_text('abc') is True
+    assert is_searchable_text('חנן בן ארי') is True
+    assert is_searchable_text('ab') is False
+    assert is_searchable_text('x') is False
+    assert is_searchable_text('') is False
+    assert is_searchable_text('   ') is False
+    assert is_searchable_text('12345') is False
+    assert is_searchable_text('א' * 101) is False
+
+def test_format_duration_short():
+    assert format_duration_short(None) == ''
+    assert format_duration_short(65) == '1:05'
+    assert format_duration_short(3661) == '1:01:01'
+
+def test_format_search_result_button_text_truncates_long_title():
+    result = {
+        'title': 'A' * 50,
+        'uploader': 'Artist Name Here',
+        'duration': 125,
+    }
+    label = format_search_result_button_text(0, result)
+    assert label.startswith('1.')
+    assert len(label) <= 64
+
+def test_build_search_results_keyboard_has_cancel():
+    results = [{'title': 'Song', 'uploader': 'Artist', 'duration': 60}]
+    keyboard = build_search_results_keyboard(results)
+    last_row = keyboard.inline_keyboard[-1]
+    assert last_row[0].callback_data == 'cancel'
+
+def test_search_youtube_parses_flat_entries():
+    fake_info = {
+        'entries': [
+            {'id': 'vid1', 'title': 'First', 'uploader': 'Channel A', 'duration': 100},
+            {'id': None},
+            {'id': 'vid2', 'title': 'Second', 'channel': 'Channel B'},
+        ]
+    }
+    with patch('utils.yt_dlp.YoutubeDL') as mock_ydl_class:
+        mock_ydl = MagicMock()
+        mock_ydl.__enter__.return_value = mock_ydl
+        mock_ydl.extract_info.return_value = fake_info
+        mock_ydl_class.return_value = mock_ydl
+
+        results = search_youtube('test query', limit=3)
+
+    assert len(results) == 2
+    assert results[0]['url'] == 'https://www.youtube.com/watch?v=vid1'
+    assert results[1]['uploader'] == 'Channel B'
 
 @pytest.mark.asyncio
 async def test_ask_format_with_multiple_urls(mock_update, mock_context):
@@ -151,7 +285,7 @@ async def test_ask_format_with_empty_message(mock_update, mock_context):
     mock_update.message.sticker = None
     await ask_format(mock_update, mock_context)
     mock_update.message.reply_text.assert_called_once()
-    assert "אנא שלח קישור תקין" in mock_update.message.reply_text.call_args[0][0]
+    assert "לא הצלחתי להבין" in mock_update.message.reply_text.call_args[0][0]
 
 @pytest.mark.asyncio
 async def test_ask_format_with_thank_you_and_url(mock_update, mock_context):
@@ -178,7 +312,7 @@ async def test_ask_format_with_video_no_caption(mock_update, mock_context):
     mock_update.message.caption = None
     await ask_format(mock_update, mock_context)
     mock_update.message.reply_text.assert_called_once()
-    assert "אנא שלח קישור תקין" in mock_update.message.reply_text.call_args[0][0]
+    assert "לא הצלחתי להבין" in mock_update.message.reply_text.call_args[0][0]
 
 # Button Click Tests
 @pytest.mark.asyncio
@@ -324,7 +458,7 @@ async def test_button_click_cancel_clears_download_state(mock_update, mock_conte
 
     assert mock_context.user_data == {}
     mock_update.callback_query.answer.assert_called_once_with('בוטל')
-    mock_update.callback_query.message.edit_text.assert_called_once_with('בוטל. אפשר לשלוח קישור חדש.')
+    mock_update.callback_query.message.edit_text.assert_called_once_with('בוטל. אפשר לשלוח קישור או חיפוש חדש.')
 
 
 def test_extract_max_height_from_format():
