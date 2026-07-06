@@ -20,11 +20,7 @@ async def queue():
     download_queue = DownloadQueue()
     download_queue.start()
     yield download_queue
-    download_queue._worker_task.cancel()
-    try:
-        await download_queue._worker_task
-    except asyncio.CancelledError:
-        pass
+    await download_queue.stop()
 
 
 @pytest.mark.asyncio
@@ -211,3 +207,24 @@ async def test_jobs_run_one_at_a_time_not_concurrently(queue):
     release_first_job.set()
     await asyncio.sleep(0.1)
     assert execution_order == ['first_done', 'second_started']
+
+
+@pytest.mark.asyncio
+async def test_stop_cancels_worker_task_cleanly(queue):
+    """זו בדיוק הבעיה שגרמה ל-'Task was destroyed but it is pending!'
+    בסגירת הבוט עם Ctrl+C - צריך לוודא ש-stop() באמת מסיים את הטאסק
+    (ולא רק מבקש cancel ומשאיר אותו תלוי)."""
+    worker_task = queue._worker_task
+    assert worker_task is not None
+    assert not worker_task.done()
+
+    await queue.stop()
+
+    assert worker_task.done()
+    assert queue._worker_task is None
+
+
+@pytest.mark.asyncio
+async def test_stop_is_safe_when_worker_never_started():
+    never_started_queue = DownloadQueue()
+    await never_started_queue.stop()  # לא אמור לזרוק שום דבר

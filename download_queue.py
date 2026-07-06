@@ -62,6 +62,20 @@ class DownloadQueue:
             self._worker_task = asyncio.create_task(self._worker_loop())
             logger.info("Download queue worker started")
 
+    async def stop(self):
+        """עוצר את ה-worker בצורה מסודרת - חובה לקרוא לפני שה-event loop
+        נסגר (למשל ב-post_stop של python-telegram-bot). בלי זה הטאסק
+        נשאר "תלוי" כש-run_polling סוגר את הלולאה בכיבוי (Ctrl+C), וגורם
+        ל-'Task was destroyed but it is pending!' בלוגים."""
+        if self._worker_task is None:
+            return
+        self._worker_task.cancel()
+        try:
+            await self._worker_task
+        except asyncio.CancelledError:
+            pass
+        self._worker_task = None
+
     async def enqueue(self, chat_id, status_message, coro_factory, weight: int = 1) -> str:
         """מכניס ג'וב לתור ומחזיר מיד (לא מחכה לביצוע בפועל).
 
