@@ -154,11 +154,27 @@ class DownloadQueue:
         return True
 
     def get_job_id_for_chat(self, chat_id) -> Optional[str]:
-        """מוצא ג'וב פעיל/ממתין עבור chat_id נתון - משמש את פקודת /stop."""
+        """מוצא ג'וב פעיל/ממתין עבור chat_id נתון (הראשון שנמצא בלבד).
+        נשאר לצורך תאימות/בדיקה - `/stop` בפועל משתמש ב-cancel_all_for_chat
+        כדי לבטל את כל הג'ובים של אותו chat_id, לא רק את הראשון."""
         for job_id, job in self._jobs.items():
             if job.chat_id == chat_id:
                 return job_id
         return None
+
+    def get_job_ids_for_chat(self, chat_id) -> list[str]:
+        """מוצא את כל הג'ובים (הרץ בפועל + כל הממתינים בתור) של chat_id
+        נתון - משתמש עלול לשלוח כמה קישורים לפני שהחליט לבטל."""
+        return [job_id for job_id, job in self._jobs.items() if job.chat_id == chat_id]
+
+    def cancel_all_for_chat(self, chat_id) -> int:
+        """מבטל את כל הג'ובים של chat_id נתון (רץ + ממתינים בתור) - לא נוגע
+        בג'ובים של chat_id-ים אחרים, כי כל הסינון כאן הוא לפי chat_id בלבד.
+        משמש את פקודת /stop. מחזיר כמה ג'ובים בוטלו בפועל."""
+        job_ids = self.get_job_ids_for_chat(chat_id)
+        for job_id in job_ids:
+            self.cancel(job_id)
+        return len(job_ids)
 
     def _position_ahead(self, job_id: str) -> int:
         """כמה ג'ובים לפני זה בתור (0 = הבא בתור / רץ עכשיו).

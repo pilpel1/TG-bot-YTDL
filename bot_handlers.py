@@ -76,13 +76,15 @@ async def stop_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text('אין תור הורדות פעיל כרגע.')
         return
 
-    job_id = download_queue.get_job_id_for_chat(chat_id)
-    if not job_id:
+    cancelled_count = download_queue.cancel_all_for_chat(chat_id)
+    if cancelled_count == 0:
         await update.message.reply_text('אין לך הורדה פעילה או ממתינה כרגע 🤷')
         return
 
-    download_queue.cancel(job_id)
-    await update.message.reply_text('ביטלתי את ההורדה 🛑')
+    if cancelled_count == 1:
+        await update.message.reply_text('ביטלתי את ההורדה 🛑')
+    else:
+        await update.message.reply_text(f'ביטלתי {cancelled_count} הורדות (כל מה שהיה לך בתור) 🛑')
 
 
 def clear_download_state(context):
