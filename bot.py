@@ -3,7 +3,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 from telegram.error import NetworkError, TimedOut
 from logger_setup import logger
 from config import BOT_TOKEN, LOCAL_API_AVAILABLE, LOCAL_API_BASE_URL, LOCAL_API_FILE_URL
-from bot_handlers import start, ask_format, button_click, handle_thank_you, version, mode
+from bot_handlers import start, ask_format, button_click, handle_thank_you, version, mode, stop_download
 from utils import cleanup_temp_files, check_ffmpeg_on_startup
 from download_queue import DownloadQueue
 
@@ -92,6 +92,7 @@ def main():
         application.add_handler(CommandHandler('start', start))
         application.add_handler(CommandHandler('version', version))
         application.add_handler(CommandHandler('mode', mode))
+        application.add_handler(CommandHandler('stop', stop_download))
         # תפיסת כל סוגי ההודעות חוץ מפקודות
         application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, ask_format))
         application.add_handler(CallbackQueryHandler(button_click))

@@ -10,6 +10,7 @@ from config import (
     MAX_MIX_DOWNLOAD_LIMIT,
 )
 from download_manager import download_with_quality, download_playlist
+from download_queue import CancellationToken
 from utils import (
     fetch_youtube_download_options,
     build_youtube_audio_option,
@@ -47,20 +48,41 @@ VERSIONS_URL = "https://github.com/pilpel1/TG-bot-YTDL/blob/main/VERSIONS.md"
 PLAYLIST_METADATA_ENTRIES_CAP = 20
 
 
-async def enqueue_download_job(context, status_message, coro_factory, weight=1):
+async def enqueue_download_job(context, status_message, coro_factory, weight=1, cancel_token=None):
     """מכניס ג'וב הורדה לתור הגלובלי ומחזיר מיד - לא מחכה לסיום ההורדה.
     כך ה-handler משתחרר ומאפשר לבוט להמשיך להגיב למשתמשים אחרים בזמן
     שההורדה עצמה רצה ברקע דרך worker התור.
 
     weight: מספר "יחידות עבודה" משוער בג'וב (1 לסרטון בודד, N לפלייליסט של
-    N סרטונים) - רק לצורך הערכת זמן, לא משפיע על הסדר."""
+    N סרטונים) - רק לצורך הערכת זמן, לא משפיע על הסדר.
+
+    cancel_token: אותו טוקן שכבר נסגר (closure) לתוך coro_factory כ-
+    should_cancel - מועבר גם לתור כדי ש-/stop יוכל לסמן אותו דרך cancel()."""
     download_queue = context.bot_data['download_queue']
     return await download_queue.enqueue(
         chat_id=status_message.chat_id,
         status_message=status_message,
         coro_factory=coro_factory,
         weight=weight,
+        cancel_token=cancel_token,
     )
+
+
+async def stop_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """פקודת /stop - מבטלת את ההורדה הפעילה/הממתינה בתור של המשתמש הזה, אם יש."""
+    chat_id = update.effective_chat.id
+    download_queue = context.bot_data.get('download_queue')
+    if not download_queue:
+        await update.message.reply_text('אין תור הורדות פעיל כרגע.')
+        return
+
+    job_id = download_queue.get_job_id_for_chat(chat_id)
+    if not job_id:
+        await update.message.reply_text('אין לך הורדה פעילה או ממתינה כרגע 🤷')
+        return
+
+    download_queue.cancel(job_id)
+    await update.message.reply_text('ביטלתי את ההורדה 🛑')
 
 
 def clear_download_state(context):
@@ -531,6 +553,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status_message = await query.message.edit_text('מעבד את הבקשה... ⏳')
         # קריאה ישירה ל-download_playlist (ולא download_with_quality) כי כבר ידוע
         # בוודאות שזה פלייליסט/מיקס - כך נחסך שלב בדיקה חוזר שמחלץ הכל מאפס.
+        cancel_token = CancellationToken()
         await enqueue_download_job(
             context,
             status_message,
@@ -542,8 +565,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 selected_option,
                 playlist_info=cached_playlist_info,
                 playlist_limit=playlist_limit,
+                should_cancel=cancel_token.is_cancelled,
             ),
             weight=job_weight,
+            cancel_token=cancel_token,
         )
         return
 
@@ -585,6 +610,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('youtube_prefetch_url', None)
         status_message = await query.message.edit_text('מעבד את הבקשה... ⏳')
 
+        cancel_token = CancellationToken()
         await enqueue_download_job(
             context,
             status_message,
@@ -594,8 +620,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 url,
                 download_mode,
                 selected_option,
-                quality_options
+                quality_options,
+                should_cancel=cancel_token.is_cancelled
             ),
+            cancel_token=cancel_token,
         )
     else:
         # טיפול בבחירת פורמט (אודיו/וידאו)
@@ -618,6 +646,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop('youtube_prefetch_task', None)
             context.user_data.pop('youtube_prefetch_url', None)
             status_message = await query.message.edit_text('מעבד את הבקשה... ⏳')
+            cancel_token = CancellationToken()
             await enqueue_download_job(
                 context,
                 status_message,
@@ -627,14 +656,17 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     current_url,
                     download_mode,
                     quality,
-                    context.user_data.get('youtube_download_options') if is_youtube else None
+                    context.user_data.get('youtube_download_options') if is_youtube else None,
+                    should_cancel=cancel_token.is_cancelled
                 ),
+                cancel_token=cancel_token,
             )
         elif not is_youtube:
             # עבור פלטפורמות שאינן יוטיוב - מתחילים הורדה מיד באיכות הטובה ביותר
             status_message = await query.message.edit_text('מעבד את הבקשה... ⏳')
             quality = DEFAULT_FORMAT
             current_url = context.user_data.get('current_url')
+            cancel_token = CancellationToken()
             await enqueue_download_job(
                 context,
                 status_message,
@@ -644,8 +676,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     current_url,
                     download_mode,
                     quality,
-                    None
+                    None,
+                    should_cancel=cancel_token.is_cancelled
                 ),
+                cancel_token=cancel_token,
             )
         else:
             await show_youtube_download_options(

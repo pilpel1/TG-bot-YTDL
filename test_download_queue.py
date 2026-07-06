@@ -3,7 +3,7 @@ import pytest
 import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-from download_queue import DownloadQueue
+from download_queue import DownloadQueue, CancellationToken
 
 
 def make_status_message(chat_id=111):
@@ -176,6 +176,108 @@ async def test_heavier_job_shows_larger_eta_for_jobs_behind_it(queue):
     assert eta > 100  # 20 יחידות * ~12 שניות ברירת מחדל ליחידה
 
     release_first_job.set()
+
+
+@pytest.mark.asyncio
+async def test_stop_cancels_worker_task_cleanly(queue):
+    """זו בדיוק הבעיה שגרמה ל-'Task was destroyed but it is pending!'
+    בסגירת הבוט עם Ctrl+C - צריך לוודא ש-stop() באמת מסיים את הטאסק
+    (ולא רק מבקש cancel ומשאיר אותו תלוי)."""
+    worker_task = queue._worker_task
+    assert worker_task is not None
+    assert not worker_task.done()
+
+    await queue.stop()
+
+    assert worker_task.done()
+    assert queue._worker_task is None
+
+
+@pytest.mark.asyncio
+async def test_stop_is_safe_when_worker_never_started():
+    never_started_queue = DownloadQueue()
+    await never_started_queue.stop()  # לא אמור לזרוק שום דבר
+
+
+def test_cancellation_token_starts_uncancelled_and_can_be_cancelled():
+    token = CancellationToken()
+    assert token.is_cancelled() is False
+    token.cancel()
+    assert token.is_cancelled() is True
+
+
+@pytest.mark.asyncio
+async def test_cancel_running_job_marks_its_cancel_token(queue):
+    """זו הדרך היחידה לעצור הורדה שכבר באמצע קובץ - ydl.download() חוסם
+    את ה-event loop כך ש-task.cancel() לא תופס נקודת await שם. ה-flag
+    הזה נבדק בנפרד מתוך progress_hook סינכרוני בתוך download_manager."""
+    job_started = asyncio.Event()
+
+    async def long_job():
+        job_started.set()
+        await asyncio.sleep(10)
+
+    token = CancellationToken()
+    status_message = make_status_message()
+    job_id = await queue.enqueue(
+        chat_id=1, status_message=status_message, coro_factory=long_job, cancel_token=token
+    )
+    await asyncio.wait_for(job_started.wait(), timeout=1)
+
+    assert token.is_cancelled() is False
+    queue.cancel(job_id)
+    assert token.is_cancelled() is True
+
+
+@pytest.mark.asyncio
+async def test_cancel_queued_job_also_marks_its_cancel_token(queue):
+    """גם ג'וב שעדיין ממתין בתור (לא התחיל לרוץ) מסמן את הטוקן שלו כשמבטלים
+    אותו - חשוב כי ה-worker קורא ל-coro_factory() רק כשהוא מגיע לג'וב, אז
+    צריך שהטוקן כבר יהיה מסומן ברגע שההורדה בפועל מתחילה."""
+    release_first_job = asyncio.Event()
+    first_job_started = asyncio.Event()
+
+    async def first_job():
+        first_job_started.set()
+        await release_first_job.wait()
+
+    async def second_job():
+        pass
+
+    token_2 = CancellationToken()
+    status_message_1 = make_status_message(chat_id=1)
+    status_message_2 = make_status_message(chat_id=2)
+
+    await queue.enqueue(chat_id=1, status_message=status_message_1, coro_factory=first_job)
+    await asyncio.wait_for(first_job_started.wait(), timeout=1)
+
+    job_id_2 = await queue.enqueue(
+        chat_id=2, status_message=status_message_2, coro_factory=second_job, cancel_token=token_2
+    )
+    assert queue.cancel(job_id_2) is True
+    assert token_2.is_cancelled() is True
+
+    release_first_job.set()
+
+
+@pytest.mark.asyncio
+async def test_get_job_id_for_chat_finds_active_job(queue):
+    job_started = asyncio.Event()
+
+    async def long_job():
+        job_started.set()
+        await asyncio.sleep(10)
+
+    status_message = make_status_message(chat_id=42)
+    assert queue.get_job_id_for_chat(42) is None
+
+    job_id = await queue.enqueue(chat_id=42, status_message=status_message, coro_factory=long_job)
+    await asyncio.wait_for(job_started.wait(), timeout=1)
+
+    assert queue.get_job_id_for_chat(42) == job_id
+    assert queue.get_job_id_for_chat(999) is None
+
+    queue.cancel(job_id)
 
 
 @pytest.mark.asyncio
