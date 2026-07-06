@@ -53,3 +53,6 @@ Thumbs.db
 # Cookies (sensitive - never commit)
 facebook_cookies.txt
 *_cookies.txt
+
+# Local dev notes - not for the public repo
+KNOWN_ISSUES.md

@@ -110,7 +110,7 @@ async def test_ask_format_with_valid_youtube_url(mock_update, mock_context):
         await ask_format(mock_update, mock_context)
 
     mock_update.message.reply_text.assert_called_once()
-    assert "מה תרצה להוריד?" in mock_update.message.reply_text.call_args[0][0]
+    assert "מה להוריד לך?" in mock_update.message.reply_text.call_args[0][0]
     mock_prefetch.assert_called_once_with(
         mock_context,
         "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
@@ -166,7 +166,7 @@ async def test_ask_format_with_photo_and_caption(mock_update, mock_context):
     with patch('bot_handlers.start_youtube_download_options_prefetch'):
         await ask_format(mock_update, mock_context)
     mock_update.message.reply_text.assert_called_once()
-    assert "מה תרצה להוריד?" in mock_update.message.reply_text.call_args[0][0]
+    assert "מה להוריד לך?" in mock_update.message.reply_text.call_args[0][0]
 
 @pytest.mark.asyncio
 async def test_ask_format_with_video_no_caption(mock_update, mock_context):
@@ -188,10 +188,19 @@ async def test_button_click_audio(mock_update, mock_context):
         'current_url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
         'is_youtube': True
     }
-    
-    with patch('bot_handlers.download_with_quality') as mock_download:
+
+    # ההורדה בפועל כבר לא נקראת ישירות מה-handler - היא נכנסת לתור ההורדות
+    # כ-coro_factory. לכן בודקים ש-enqueue_download_job נקרא, ואז מפעילים את
+    # ה-coro_factory שנשלח אליו כדי לוודא שהוא אכן קורא ל-download_with_quality
+    # עם הפרמטרים הנכונים.
+    with patch('bot_handlers.download_with_quality') as mock_download, \
+         patch('bot_handlers.enqueue_download_job', new=AsyncMock()) as mock_enqueue:
         mock_download.return_value = AsyncMock()
         await button_click(mock_update, mock_context)
+        mock_enqueue.assert_called_once()
+        coro_factory = mock_enqueue.call_args[0][2]
+        await coro_factory()
+
         mock_download.assert_called_once()
         selected_quality = mock_download.call_args[0][4]
         assert selected_quality['download_mode'] == 'audio'
@@ -225,7 +234,7 @@ async def test_ask_format_with_youtube_playlist_starts_prefetch_and_shows_format
         await ask_format(mock_update, mock_context)
 
     mock_update.message.reply_text.assert_called_once()
-    assert "מה תרצה להוריד?" in mock_update.message.reply_text.call_args[0][0]
+    assert "מה להוריד לך?" in mock_update.message.reply_text.call_args[0][0]
     assert isinstance(mock_update.message.reply_text.call_args[1]['reply_markup'], InlineKeyboardMarkup)
     mock_prefetch.assert_called_once_with(
         mock_context,
@@ -246,9 +255,12 @@ async def test_button_click_dynamic_quality_selection_uses_cached_options(mock_u
         'youtube_download_options': [build_youtube_quality_option(720)]
     }
 
-    with patch('bot_handlers.download_with_quality') as mock_download:
+    with patch('bot_handlers.download_with_quality') as mock_download, \
+         patch('bot_handlers.enqueue_download_job', new=AsyncMock()) as mock_enqueue:
         mock_download.return_value = AsyncMock()
         await button_click(mock_update, mock_context)
+        coro_factory = mock_enqueue.call_args[0][2]
+        await coro_factory()
 
     selected_quality = mock_download.call_args[0][4]
     assert selected_quality['quality_name'] == '720p'

@@ -47,6 +47,22 @@ VERSIONS_URL = "https://github.com/pilpel1/TG-bot-YTDL/blob/main/VERSIONS.md"
 PLAYLIST_METADATA_ENTRIES_CAP = 20
 
 
+async def enqueue_download_job(context, status_message, coro_factory, weight=1):
+    """מכניס ג'וב הורדה לתור הגלובלי ומחזיר מיד - לא מחכה לסיום ההורדה.
+    כך ה-handler משתחרר ומאפשר לבוט להמשיך להגיב למשתמשים אחרים בזמן
+    שההורדה עצמה רצה ברקע דרך worker התור.
+
+    weight: מספר "יחידות עבודה" משוער בג'וב (1 לסרטון בודד, N לפלייליסט של
+    N סרטונים) - רק לצורך הערכת זמן, לא משפיע על הסדר."""
+    download_queue = context.bot_data['download_queue']
+    return await download_queue.enqueue(
+        chat_id=status_message.chat_id,
+        status_message=status_message,
+        coro_factory=coro_factory,
+        weight=weight,
+    )
+
+
 def clear_download_state(context):
     """מנקה את מצב ההורדה הנוכחי של המשתמש."""
     for key in [
@@ -155,14 +171,18 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(valid_urls) > 1:
             await message.reply_text(
                 "זיהיתי מספר קישורים בהודעה שלך. אני אוריד את התוכן מהקישור הראשון.\n"
-                "אם תרצה להוריד גם מהקישורים הנוספים, אנא שלח כל קישור בהודעה נפרדת 😊"
+                "אם תרצה להוריד גם מהקישורים הנוספים, אנא שלח כל קישור בהודעה נפרדת 😊",
+                quote=True
             )
         
         if is_youtube:
+            # quote=True - כדי שהודעת "מה להוריד" תישאר מקושרת לקישור המקורי
+            # ולא תלך לאיבוד בין הודעות אחרות בצ'אט.
             status_message = await message.reply_text(
                 'מה להוריד לך? נא לבחור\n'
                 '(איכויות הווידאו נבדקות ברקע...)',
-                reply_markup=build_format_keyboard()
+                reply_markup=build_format_keyboard(),
+                quote=True
             )
             prefetch_task = start_youtube_download_options_prefetch(context, url)
             prefetch_task.add_done_callback(
@@ -171,7 +191,7 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             )
         else:
-            await message.reply_text('מה תרצה להוריד?', reply_markup=build_format_keyboard())
+            await message.reply_text('מה תרצה להוריד?', reply_markup=build_format_keyboard(), quote=True)
     elif not is_thank:
         # אם אין URL וגם אין תודה, שולח הודעת הסבר
         await message.reply_text(
@@ -466,7 +486,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         url = context.user_data.get('current_url')
         selected_option = context.user_data.get('pending_batch_quality')
         quality_levels = context.user_data.get('pending_batch_quality_levels')
-        is_mix = context.user_data.get('is_batch_mix', False)
 
         if not url or not selected_option:
             await query.answer()
@@ -504,23 +523,27 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('is_batch_mix', None)
         context.user_data.pop('batch_playlist_info', None)
 
-        batch_label = 'המיקס' if is_mix else 'הפלייליסט'
-        status_text = (
-            f'מתחיל להוריד {playlist_limit} סרטונים מ{batch_label}... ⏳'
-            if playlist_limit
-            else f'מתחיל להוריד את כל {batch_label}... ⏳'
-        )
-        status_message = await query.message.edit_text(status_text)
+        # הערכת "משקל" הג'וב לצורך חישוב זמן המתנה בתור - מספר הסרטונים
+        # שבאמת ירדו. אם המשתמש בחר "הכל" (playlist_limit=None) ואין לנו
+        # ספירה מדויקת, נופלים על ברירת מחדל סבירה.
+        job_weight = playlist_limit or cached_entries_available or 10
+
+        status_message = await query.message.edit_text('מעבד את הבקשה... ⏳')
         # קריאה ישירה ל-download_playlist (ולא download_with_quality) כי כבר ידוע
         # בוודאות שזה פלייליסט/מיקס - כך נחסך שלב בדיקה חוזר שמחלץ הכל מאפס.
-        await download_playlist(
+        await enqueue_download_job(
             context,
             status_message,
-            url,
-            download_mode,
-            selected_option,
-            playlist_info=cached_playlist_info,
-            playlist_limit=playlist_limit,
+            lambda: download_playlist(
+                context,
+                status_message,
+                url,
+                download_mode,
+                selected_option,
+                playlist_info=cached_playlist_info,
+                playlist_limit=playlist_limit,
+            ),
+            weight=job_weight,
         )
         return
 
@@ -560,15 +583,19 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         context.user_data.pop('youtube_prefetch_task', None)
         context.user_data.pop('youtube_prefetch_url', None)
-        status_message = await query.message.edit_text('מתחיל בהורדה... ⏳')
+        status_message = await query.message.edit_text('מעבד את הבקשה... ⏳')
 
-        await download_with_quality(
+        await enqueue_download_job(
             context,
             status_message,
-            url,
-            download_mode,
-            selected_option,
-            quality_options
+            lambda: download_with_quality(
+                context,
+                status_message,
+                url,
+                download_mode,
+                selected_option,
+                quality_options
+            ),
         )
     else:
         # טיפול בבחירת פורמט (אודיו/וידאו)
@@ -590,26 +617,35 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             context.user_data.pop('youtube_prefetch_task', None)
             context.user_data.pop('youtube_prefetch_url', None)
-            status_message = await query.message.edit_text('מתחיל בהורדה... ⏳')
-            await download_with_quality(
+            status_message = await query.message.edit_text('מעבד את הבקשה... ⏳')
+            await enqueue_download_job(
                 context,
                 status_message,
-                current_url,
-                download_mode,
-                quality,
-                context.user_data.get('youtube_download_options') if is_youtube else None
+                lambda: download_with_quality(
+                    context,
+                    status_message,
+                    current_url,
+                    download_mode,
+                    quality,
+                    context.user_data.get('youtube_download_options') if is_youtube else None
+                ),
             )
         elif not is_youtube:
             # עבור פלטפורמות שאינן יוטיוב - מתחילים הורדה מיד באיכות הטובה ביותר
-            status_message = await query.message.edit_text('מתחיל בהורדה... ⏳')
+            status_message = await query.message.edit_text('מעבד את הבקשה... ⏳')
             quality = DEFAULT_FORMAT
-            await download_with_quality(
+            current_url = context.user_data.get('current_url')
+            await enqueue_download_job(
                 context,
                 status_message,
-                context.user_data.get('current_url'),
-                download_mode,
-                quality,
-                None
+                lambda: download_with_quality(
+                    context,
+                    status_message,
+                    current_url,
+                    download_mode,
+                    quality,
+                    None
+                ),
             )
         else:
             await show_youtube_download_options(

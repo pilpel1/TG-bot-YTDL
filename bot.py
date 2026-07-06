@@ -5,6 +5,16 @@ from logger_setup import logger
 from config import BOT_TOKEN, LOCAL_API_AVAILABLE, LOCAL_API_BASE_URL, LOCAL_API_FILE_URL
 from bot_handlers import start, ask_format, button_click, handle_thank_you, version, mode
 from utils import cleanup_temp_files, check_ffmpeg_on_startup
+from download_queue import DownloadQueue
+
+async def post_init(application):
+    """מריץ אחרי שה-Application מאותחל אבל עדיין לפני תחילת ה-polling -
+    הנקודה הנכונה להתחיל טאסקים ברקע (כמו worker התור), כי כאן כבר יש
+    event loop רץ."""
+    download_queue = DownloadQueue()
+    download_queue.start()
+    application.bot_data['download_queue'] = download_queue
+    logger.info("Download queue initialized")
 
 async def error_handler(update: Update, context):
     """טיפול בשגיאות של הבוט"""
@@ -52,6 +62,7 @@ def main():
                           .get_updates_connection_pool_size(1)
                           .get_updates_connect_timeout(60)
                           .get_updates_read_timeout(60)
+                          .post_init(post_init)
                           .build())
         else:
             logger.info("Local API Server not available - using standard 50MB mode")
@@ -62,6 +73,7 @@ def main():
                           .get_updates_connection_pool_size(1)
                           .get_updates_connect_timeout(60)
                           .get_updates_read_timeout(60)
+                          .post_init(post_init)
                           .build())
         
         # Add handlers
