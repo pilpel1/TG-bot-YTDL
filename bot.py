@@ -16,6 +16,16 @@ async def post_init(application):
     application.bot_data['download_queue'] = download_queue
     logger.info("Download queue initialized")
 
+async def post_stop(application):
+    """מריץ אחרי Application.stop() אבל עדיין עם event loop רץ - הנקודה
+    הנכונה לעצור טאסקים ברקע שהתחלנו ב-post_init. בלי זה, worker התור
+    נשאר "תלוי" כש-run_polling סוגר את ה-loop בסגירה עם Ctrl+C, וגורם
+    ל-'Task was destroyed but it is pending!' בלוגים."""
+    download_queue = application.bot_data.get('download_queue')
+    if download_queue:
+        await download_queue.stop()
+        logger.info("Download queue worker stopped")
+
 async def error_handler(update: Update, context):
     """טיפול בשגיאות של הבוט"""
     error = context.error
@@ -63,6 +73,7 @@ def main():
                           .get_updates_connect_timeout(60)
                           .get_updates_read_timeout(60)
                           .post_init(post_init)
+                          .post_stop(post_stop)
                           .build())
         else:
             logger.info("Local API Server not available - using standard 50MB mode")
@@ -74,6 +85,7 @@ def main():
                           .get_updates_connect_timeout(60)
                           .get_updates_read_timeout(60)
                           .post_init(post_init)
+                          .post_stop(post_stop)
                           .build())
         
         # Add handlers
