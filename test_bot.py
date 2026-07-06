@@ -474,22 +474,33 @@ async def test_stop_download_with_no_queue_initialized(mock_update, mock_context
 @pytest.mark.asyncio
 async def test_stop_download_with_no_active_job(mock_update, mock_context):
     mock_download_queue = MagicMock()
-    mock_download_queue.get_job_id_for_chat.return_value = None
+    mock_download_queue.cancel_all_for_chat.return_value = 0
     mock_context.bot_data = {'download_queue': mock_download_queue}
 
     await stop_download(mock_update, mock_context)
 
-    mock_download_queue.get_job_id_for_chat.assert_called_once_with(mock_update.effective_chat.id)
-    mock_download_queue.cancel.assert_not_called()
+    mock_download_queue.cancel_all_for_chat.assert_called_once_with(mock_update.effective_chat.id)
     mock_update.message.reply_text.assert_called_once_with('אין לך הורדה פעילה או ממתינה כרגע 🤷')
 
 @pytest.mark.asyncio
 async def test_stop_download_cancels_active_job(mock_update, mock_context):
     mock_download_queue = MagicMock()
-    mock_download_queue.get_job_id_for_chat.return_value = 'job-123'
+    mock_download_queue.cancel_all_for_chat.return_value = 1
     mock_context.bot_data = {'download_queue': mock_download_queue}
 
     await stop_download(mock_update, mock_context)
 
-    mock_download_queue.cancel.assert_called_once_with('job-123')
+    mock_download_queue.cancel_all_for_chat.assert_called_once_with(mock_update.effective_chat.id)
     mock_update.message.reply_text.assert_called_once_with('ביטלתי את ההורדה 🛑')
+
+@pytest.mark.asyncio
+async def test_stop_download_cancels_all_own_jobs_when_multiple_queued(mock_update, mock_context):
+    """אם שלחתי כמה קישורים ויש לי כמה ג'ובים משלי בתור, /stop מבטל את
+    כולם - לא רק את הראשון שנמצא."""
+    mock_download_queue = MagicMock()
+    mock_download_queue.cancel_all_for_chat.return_value = 3
+    mock_context.bot_data = {'download_queue': mock_download_queue}
+
+    await stop_download(mock_update, mock_context)
+
+    mock_update.message.reply_text.assert_called_once_with('ביטלתי 3 הורדות (כל מה שהיה לך בתור) 🛑')

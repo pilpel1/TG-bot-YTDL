@@ -261,6 +261,67 @@ async def test_cancel_queued_job_also_marks_its_cancel_token(queue):
 
 
 @pytest.mark.asyncio
+async def test_cancel_all_for_chat_does_not_touch_other_users_jobs(queue):
+    """שאלת בטיחות קריטית: משתמש שממתין בתור (מקום 2) שולח /stop - זה לא
+    אמור לבטל את ההורדה הרצה של מישהו אחר (מקום 1), רק את שלו."""
+    running_job_started = asyncio.Event()
+    release_running_job = asyncio.Event()
+
+    async def other_users_job():
+        running_job_started.set()
+        await release_running_job.wait()
+
+    async def my_queued_job():
+        pass
+
+    status_message_other = make_status_message(chat_id=1)
+    status_message_mine = make_status_message(chat_id=2)
+
+    other_job_id = await queue.enqueue(chat_id=1, status_message=status_message_other, coro_factory=other_users_job)
+    await asyncio.wait_for(running_job_started.wait(), timeout=1)
+    await queue.enqueue(chat_id=2, status_message=status_message_mine, coro_factory=my_queued_job)
+
+    cancelled_count = queue.cancel_all_for_chat(2)
+
+    assert cancelled_count == 1
+    assert 2 not in [job.chat_id for job in queue._jobs.values()]
+    assert 1 in [job.chat_id for job in queue._jobs.values()]  # ההורדה של המשתמש האחר ממשיכה לרוץ
+
+    release_running_job.set()
+    await asyncio.sleep(0.05)
+
+
+@pytest.mark.asyncio
+async def test_cancel_all_for_chat_cancels_every_job_of_same_user(queue):
+    """אם למשתמש יש כמה ג'ובים משלו בתור (שלח כמה קישורים), /stop מבטל
+    את כולם - לא רק את הראשון שנמצא."""
+    first_job_started = asyncio.Event()
+    release_first_job = asyncio.Event()
+
+    async def first_job():
+        first_job_started.set()
+        await release_first_job.wait()
+
+    async def other_queued_job():
+        pass
+
+    status_message_1 = make_status_message(chat_id=5)
+    status_message_2 = make_status_message(chat_id=5)
+    status_message_3 = make_status_message(chat_id=5)
+
+    await queue.enqueue(chat_id=5, status_message=status_message_1, coro_factory=first_job)
+    await asyncio.wait_for(first_job_started.wait(), timeout=1)
+    await queue.enqueue(chat_id=5, status_message=status_message_2, coro_factory=other_queued_job)
+    await queue.enqueue(chat_id=5, status_message=status_message_3, coro_factory=other_queued_job)
+
+    cancelled_count = queue.cancel_all_for_chat(5)
+
+    assert cancelled_count == 3
+    await asyncio.sleep(0.05)
+    assert len(queue._jobs) == 0
+
+
+@pytest.mark.asyncio
 async def test_get_job_id_for_chat_finds_active_job(queue):
     job_started = asyncio.Event()
 
