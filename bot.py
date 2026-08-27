@@ -1,19 +1,14 @@
-from telegram import Update, BotCommand
+from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram.error import NetworkError, TimedOut
 from logger_setup import logger
 from config import BOT_TOKEN, LOCAL_API_AVAILABLE, LOCAL_API_BASE_URL, LOCAL_API_FILE_URL
-from bot_handlers import start, ask_format, button_click, handle_thank_you, version, help_command, stop_download, search_mode
+from bot_handlers import (
+    start, ask_format, button_click, handle_thank_you, version, help_command,
+    stop_download, search_mode, build_bot_commands,
+)
 from utils import cleanup_temp_files, check_ffmpeg_on_startup
 from download_queue import DownloadQueue
-
-BOT_COMMANDS = [
-    BotCommand('start', 'הודעת פתיחה'),
-    BotCommand('help', 'עזרה, פקודות ומגבלת קבצים'),
-    BotCommand('search_mode', 'הפעלה/כיבוי חיפוש יוטיוב בטקסט'),
-    BotCommand('stop', 'ביטול הורדה פעילה או ממתינה'),
-    BotCommand('version', 'גרסה נוכחית ושינויים'),
-]
 
 
 async def post_init(application):
@@ -25,7 +20,9 @@ async def post_init(application):
     application.bot_data['download_queue'] = download_queue
     logger.info("Download queue initialized")
 
-    await application.bot.set_my_commands(BOT_COMMANDS)
+    # ברירת מחדל גלובלית (כבוי). לכל משתמש מתעדכן תפריט פרטי
+    # ב-/search_mode, /start ו-/help דרך BotCommandScopeChat.
+    await application.bot.set_my_commands(build_bot_commands(search_mode_on=False))
     logger.info("Bot commands menu registered")
 
 async def post_stop(application):

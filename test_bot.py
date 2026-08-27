@@ -6,7 +6,7 @@ from telegram.ext import ContextTypes
 from bot_handlers import (
     is_valid_url, is_preferred_platform, is_thank_you_message, is_searchable_text,
     start, ask_format, button_click, handle_thank_you, stop_download, search_mode,
-    help_command, build_search_results_keyboard,
+    help_command, build_search_results_keyboard, build_bot_commands,
 )
 from config import YOUTUBE_QUALITY_LEVELS
 from download_manager import (
@@ -58,6 +58,8 @@ def mock_update():
 def mock_context():
     context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
     context.user_data = {}
+    context.bot = MagicMock()
+    context.bot.set_my_commands = AsyncMock()
     return context
 
 # URL Validation Tests
@@ -260,10 +262,25 @@ async def test_search_mode_command_toggles(mock_update, mock_context):
     await search_mode(mock_update, mock_context)
     assert mock_context.user_data['search_mode'] is True
     assert "הופעל" in mock_update.message.reply_text.call_args[0][0]
+    mock_context.bot.set_my_commands.assert_awaited()
+    commands = mock_context.bot.set_my_commands.call_args[0][0]
+    search_cmd = next(c for c in commands if c.command == 'search_mode')
+    assert 'פעיל כעת' in search_cmd.description
 
     await search_mode(mock_update, mock_context)
     assert mock_context.user_data['search_mode'] is False
     assert "כובה" in mock_update.message.reply_text.call_args[0][0]
+    commands = mock_context.bot.set_my_commands.call_args[0][0]
+    search_cmd = next(c for c in commands if c.command == 'search_mode')
+    assert 'כבוי כעת' in search_cmd.description
+
+def test_build_bot_commands_reflects_search_mode_status():
+    off_commands = build_bot_commands(False)
+    on_commands = build_bot_commands(True)
+    off_search = next(c for c in off_commands if c.command == 'search_mode')
+    on_search = next(c for c in on_commands if c.command == 'search_mode')
+    assert off_search.description == 'מצב חיפוש (כבוי כעת)'
+    assert on_search.description == 'מצב חיפוש (פעיל כעת)'
 
 @pytest.mark.asyncio
 async def test_button_click_search_pick_starts_youtube_flow(mock_update, mock_context):

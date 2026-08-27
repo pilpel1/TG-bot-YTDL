@@ -1,4 +1,4 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, BotCommandScopeChat
 from telegram.ext import ContextTypes
 from logger_setup import logger
 from config import (
@@ -162,8 +162,41 @@ def is_searchable_text(text: str) -> bool:
 
 
 def is_search_mode_enabled(context) -> bool:
-    """מצב חיפוש כבוי כברירת מחדל - מופעל רק ב-/search_mode."""
+    """מצב חיפוש כבוי כברירת מחדל - מופעל רק ב-/search_mode.
+
+    נשמר ב-context.user_data → פר-משתמש (לא משפיע על משתמשים אחרים)."""
     return bool(context.user_data.get('search_mode'))
+
+
+def build_bot_commands(search_mode_on: bool = False):
+    """בונה רשימת פקודות לתפריט טלגרם, עם סטטוס מצב חיפוש בתיאור."""
+    search_desc = (
+        'מצב חיפוש (פעיל כעת)'
+        if search_mode_on
+        else 'מצב חיפוש (כבוי כעת)'
+    )
+    return [
+        BotCommand('start', 'הודעת פתיחה'),
+        BotCommand('help', 'עזרה, פקודות ומגבלת קבצים'),
+        BotCommand('search_mode', search_desc),
+        BotCommand('stop', 'ביטול הורדה פעילה או ממתינה'),
+        BotCommand('version', 'גרסה נוכחית ושינויים'),
+    ]
+
+
+async def sync_user_command_menu(bot, chat_id, search_mode_on: bool):
+    """מעדכן את תפריט הפקודות רק לצ'אט הזה (BotCommandScopeChat).
+
+    ככה סטטוס 'פעיל/כבוי' של משתמש א' לא מופיע אצל משתמש ב'.
+    נקרא גם ב-/start ו-/help כדי לתקן תיאור ישן אחרי ריסטארט בוט
+    (user_data בזיכרון מתאפס, אבל תפריט טלגרם נשאר עד שמעדכנים)."""
+    try:
+        await bot.set_my_commands(
+            build_bot_commands(search_mode_on),
+            scope=BotCommandScopeChat(chat_id=chat_id),
+        )
+    except Exception as e:
+        logger.warning(f"Could not sync command menu for chat {chat_id}: {e}")
 
 
 def build_unrecognized_input_message(search_mode_on: bool = False) -> str:
@@ -224,9 +257,14 @@ async def handle_youtube_text_search(message, context, query):
 
 
 async def search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """מפעיל/מכבה מצב חיפוש טקסט חופשי ביוטיוב."""
+    """מפעיל/מכבה מצב חיפוש טקסט חופשי ביוטיוב (פר-משתמש ב-user_data)."""
     enabled = not is_search_mode_enabled(context)
     context.user_data['search_mode'] = enabled
+    await sync_user_command_menu(
+        context.bot,
+        update.effective_chat.id,
+        enabled,
+    )
     if enabled:
         await update.message.reply_text(
             'מצב חיפוש הופעל 🔍\n'
@@ -277,6 +315,11 @@ async def begin_youtube_download_flow(message, context, url, *, edit_existing=Fa
     return status_message
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await sync_user_command_menu(
+        context.bot,
+        update.effective_chat.id,
+        is_search_mode_enabled(context),
+    )
     await update.message.reply_text(
         'שלום! 👋\n'
         f'{SUPPORTED_SITES_MESSAGE}\n'
@@ -296,7 +339,13 @@ def build_file_limit_summary() -> str:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """עזרה כללית: מה הבוט עושה, פקודות, ומגבלת קבצים."""
-    search_status = 'דלוק 🔍' if is_search_mode_enabled(context) else 'כבוי'
+    search_mode_on = is_search_mode_enabled(context)
+    await sync_user_command_menu(
+        context.bot,
+        update.effective_chat.id,
+        search_mode_on,
+    )
+    search_status = 'דלוק 🔍' if search_mode_on else 'כבוי'
     await update.message.reply_text(
         '🤖 עזרה\n\n'
         f'{SUPPORTED_SITES_MESSAGE}\n\n'
