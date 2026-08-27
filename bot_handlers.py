@@ -280,9 +280,38 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         'שלום! 👋\n'
         f'{SUPPORTED_SITES_MESSAGE}\n'
-        'פשוט שלח לי קישור ואני אשאל אותך אם תרצה להוריד אודיו או וידאו.\n'
-        'עבור סרטוני יוטיוב תוכל גם לבחור איכות.\n'
-        'לחיפוש ביוטיוב לפי טקסט (שם שיר/אמן): /search_mode'
+        'שלח קישור להורדה, או /search_mode לחיפוש ביוטיוב לפי טקסט.\n'
+        'עזרה מלאה ופקודות: /help'
+    )
+
+
+def build_file_limit_summary() -> str:
+    """שורת מצב מגבלת קבצים (מידע בלבד — המשתמש לא יכול לשנות זאת)."""
+    file_size_gb = MAX_FILE_SIZE / (1024 * 1024 * 1024)
+    file_size_mb = MAX_FILE_SIZE / (1024 * 1024)
+    if file_size_gb >= 1:
+        return f'מגבלת קבצים נוכחית: עד {file_size_gb:.1f}GB (Local API)'
+    return f'מגבלת קבצים נוכחית: עד {file_size_mb:.0f}MB (Telegram רגיל)'
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """עזרה כללית: מה הבוט עושה, פקודות, ומגבלת קבצים."""
+    search_status = 'דלוק 🔍' if is_search_mode_enabled(context) else 'כבוי'
+    await update.message.reply_text(
+        '🤖 עזרה\n\n'
+        f'{SUPPORTED_SITES_MESSAGE}\n\n'
+        'איך משתמשים:\n'
+        '• שלח קישור — אשאל אודיו/וידאו (וביוטיוב גם איכות)\n'
+        '• חיפוש לפי שם שיר/אמן — הפעל /search_mode ואז שלח טקסט\n'
+        '• אם יש קישור בהודעה, אתייחס רק אליו\n\n'
+        'פקודות:\n'
+        '/start — הודעת פתיחה\n'
+        '/help — העזרה הזאת\n'
+        '/search_mode — הפעלה/כיבוי חיפוש טקסט (כרגע: '
+        f'{search_status})\n'
+        '/stop — ביטול הורדה פעילה או ממתינה בתור\n'
+        '/version — גרסה נוכחית ושינויים\n\n'
+        f'{build_file_limit_summary()}'
     )
 
 async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -858,32 +887,4 @@ async def version(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📚 לגרסאות קודמות: <a href=\"{VERSIONS_URL}\">צפייה ב-GitHub</a>",
         parse_mode='HTML',
         disable_web_page_preview=True
-    )
-
-
-async def mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """הצגת מידע על המצב הנוכחי של הבוט"""
-    file_size_gb = MAX_FILE_SIZE / (1024 * 1024 * 1024)
-    file_size_mb = MAX_FILE_SIZE / (1024 * 1024)
-    
-    if file_size_gb >= 1:
-        mode_text = f"🚀 **מצב מתקדם** - מגבלת קבצים: {file_size_gb:.1f}GB"
-        server_text = "✅ Local API Server זמין"
-    else:
-        mode_text = f"📱 **מצב פשוט** - מגבלת קבצים: {file_size_mb:.0f}MB"
-        server_text = "❌ Local API Server לא זמין"
-    
-    message = f"""🤖 **מצב הבוט הנוכחי:**
-
-{mode_text}
-{server_text}
-
-ℹ️ **הסבר מצבים:**
-• **מצב פשוט (50MB)**: תמיד עובד עם Telegram API הרגיל
-• **מצב חכם (2GB/50MB)**: מנסה Local Server, אם נכשל עובר ל-50MB
-
-💡 **אפשרויות הפעלה:**
-• `run_bot_simple_50MB` - תמיד 50MB
-• `run_bot_advanced_2GB` - חכם עם auto-fallback"""
-    
-    await update.message.reply_text(message, parse_mode='Markdown') 
+    ) 

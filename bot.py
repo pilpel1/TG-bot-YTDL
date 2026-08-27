@@ -3,16 +3,16 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 from telegram.error import NetworkError, TimedOut
 from logger_setup import logger
 from config import BOT_TOKEN, LOCAL_API_AVAILABLE, LOCAL_API_BASE_URL, LOCAL_API_FILE_URL
-from bot_handlers import start, ask_format, button_click, handle_thank_you, version, mode, stop_download, search_mode
+from bot_handlers import start, ask_format, button_click, handle_thank_you, version, help_command, stop_download, search_mode
 from utils import cleanup_temp_files, check_ffmpeg_on_startup
 from download_queue import DownloadQueue
 
 BOT_COMMANDS = [
-    BotCommand('start', 'הודעת פתיחה והסבר'),
+    BotCommand('start', 'הודעת פתיחה'),
+    BotCommand('help', 'עזרה, פקודות ומגבלת קבצים'),
     BotCommand('search_mode', 'הפעלה/כיבוי חיפוש יוטיוב בטקסט'),
     BotCommand('stop', 'ביטול הורדה פעילה או ממתינה'),
     BotCommand('version', 'גרסה נוכחית ושינויים'),
-    BotCommand('mode', 'מצב הבוט (50MB / 2GB)'),
 ]
 
 
@@ -102,8 +102,8 @@ def main():
         
         # Add handlers
         application.add_handler(CommandHandler('start', start))
+        application.add_handler(CommandHandler('help', help_command))
         application.add_handler(CommandHandler('version', version))
-        application.add_handler(CommandHandler('mode', mode))
         application.add_handler(CommandHandler('stop', stop_download))
         application.add_handler(CommandHandler('search_mode', search_mode))
         # תפיסת כל סוגי ההודעות חוץ מפקודות

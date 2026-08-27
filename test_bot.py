@@ -6,7 +6,7 @@ from telegram.ext import ContextTypes
 from bot_handlers import (
     is_valid_url, is_preferred_platform, is_thank_you_message, is_searchable_text,
     start, ask_format, button_click, handle_thank_you, stop_download, search_mode,
-    build_search_results_keyboard,
+    help_command, build_search_results_keyboard,
 )
 from config import YOUTUBE_QUALITY_LEVELS
 from download_manager import (
@@ -108,6 +108,23 @@ async def test_start_command(mock_update, mock_context):
     await start(mock_update, mock_context)
     mock_update.message.reply_text.assert_called_once()
     assert "שלום!" in mock_update.message.reply_text.call_args[0][0]
+    assert "/help" in mock_update.message.reply_text.call_args[0][0]
+
+@pytest.mark.asyncio
+async def test_help_command(mock_update, mock_context):
+    await help_command(mock_update, mock_context)
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "/search_mode" in text
+    assert "/stop" in text
+    assert "/version" in text
+    assert "מגבלת קבצים" in text
+    assert "כבוי" in text
+
+@pytest.mark.asyncio
+async def test_help_command_shows_search_mode_on(mock_update, mock_context):
+    mock_context.user_data['search_mode'] = True
+    await help_command(mock_update, mock_context)
+    assert "דלוק" in mock_update.message.reply_text.call_args[0][0]
 
 # Format Selection Tests
 @pytest.mark.asyncio
