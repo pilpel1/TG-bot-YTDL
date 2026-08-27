@@ -54,6 +54,9 @@ Thumbs.db
 facebook_cookies.txt
 *_cookies.txt
 
+# Local runtime data (user settings, etc.)
+data/
+
 # Local dev notes - not for the public repo
 KNOWN_ISSUES.md
 HANDOFF.md

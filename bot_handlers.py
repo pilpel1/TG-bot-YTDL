@@ -1,4 +1,4 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, BotCommandScopeChat
 from telegram.ext import ContextTypes
 from logger_setup import logger
 from config import (
@@ -8,9 +8,13 @@ from config import (
     CHANGELOG,
     MAX_FILE_SIZE,
     MAX_MIX_DOWNLOAD_LIMIT,
+    YOUTUBE_SEARCH_RESULTS_LIMIT,
+    YOUTUBE_SEARCH_MIN_QUERY_LENGTH,
+    YOUTUBE_SEARCH_MAX_QUERY_LENGTH,
 )
 from download_manager import download_with_quality, download_playlist
 from download_queue import CancellationToken
+from user_settings import get_search_mode, set_search_mode
 from utils import (
     fetch_youtube_download_options,
     build_youtube_audio_option,
@@ -20,6 +24,8 @@ from utils import (
     is_youtube_mix_url,
     is_youtube_playlist_url,
     count_playlist_entries,
+    search_youtube,
+    format_search_result_button_text,
 )
 import asyncio
 import random
@@ -103,6 +109,8 @@ def clear_download_state(context):
         'pending_batch_quality_levels',
         'is_batch_mix',
         'batch_playlist_info',
+        'youtube_search_results',
+        'youtube_search_query',
     ]:
         context.user_data.pop(key, None)
 
@@ -139,12 +147,229 @@ def is_thank_you_message(text: str) -> bool:
     ]
     return any(re.search(pattern, text.lower()) for pattern in thank_you_patterns)
 
+
+def is_searchable_text(text: str) -> bool:
+    """בודק אם הטקסט שווה ניסיון חיפוש יוטיוב (לא URL).
+
+    לא כל טקסט שאינו URL נחשב חיפוש — רק מחרוזות באורך סביר שמכילות
+    לפחות אות אחת. טקסט ארוך מדי, קצר מדי, או בלי אותיות → הודעת
+    הסבר גנרית בלי לפנות ליוטיוב."""
+    stripped = (text or '').strip()
+    if len(stripped) < YOUTUBE_SEARCH_MIN_QUERY_LENGTH:
+        return False
+    if len(stripped) > YOUTUBE_SEARCH_MAX_QUERY_LENGTH:
+        return False
+    return bool(re.search(r'[a-zA-Z\u0590-\u05FF]', stripped))
+
+
+def is_search_mode_enabled(context, user_id=None) -> bool:
+    """מצב חיפוש — פר-משתמש, נשמר לדיסק ושורד ריסטארט.
+
+    קודם נטען מ-user_data (זיכרון); אם עדיין לא נטען בהרצה הנוכחית —
+    נשלף מ-data/search_modes.json. בלי user_id ובלי ערך בזיכרון → כבוי."""
+    if 'search_mode' not in context.user_data:
+        if user_id is None:
+            return False
+        context.user_data['search_mode'] = get_search_mode(user_id)
+    return bool(context.user_data['search_mode'])
+
+
+def build_bot_commands(search_mode_on: bool = False):
+    """בונה רשימת פקודות לתפריט טלגרם, עם סטטוס מצב חיפוש בתיאור."""
+    search_desc = (
+        'מצב חיפוש (פעיל כעת)'
+        if search_mode_on
+        else 'מצב חיפוש (כבוי כעת)'
+    )
+    return [
+        BotCommand('start', 'הודעת פתיחה'),
+        BotCommand('help', 'עזרה, פקודות ומגבלת קבצים'),
+        BotCommand('search_mode', search_desc),
+        BotCommand('stop', 'ביטול הורדה פעילה או ממתינה'),
+        BotCommand('version', 'גרסה נוכחית ושינויים'),
+    ]
+
+
+async def sync_user_command_menu(bot, chat_id, search_mode_on: bool):
+    """מעדכן את תפריט הפקודות רק לצ'אט הזה (BotCommandScopeChat).
+
+    ככה סטטוס 'פעיל/כבוי' של משתמש א' לא מופיע אצל משתמש ב'.
+    נקרא גם ב-/start ו-/help כדי לתקן תיאור ישן אחרי ריסטארט בוט
+    (user_data בזיכרון מתאפס, אבל תפריט טלגרם נשאר עד שמעדכנים)."""
+    try:
+        await bot.set_my_commands(
+            build_bot_commands(search_mode_on),
+            scope=BotCommandScopeChat(chat_id=chat_id),
+        )
+    except Exception as e:
+        logger.warning(f"Could not sync command menu for chat {chat_id}: {e}")
+
+
+def build_unrecognized_input_message(search_mode_on: bool = False) -> str:
+    """הודעה לטקסט שלא זוהה כקישור (וכשמצב חיפוש כבוי - גם לא כתודה)."""
+    if search_mode_on:
+        return (
+            "לא הצלחתי להבין את ההודעה.\n"
+            "במצב חיפוש שלח שם שיר/אמן (או קישור להורדה).\n"
+            "לכיבוי: /search_mode"
+        )
+    return (
+        "אנא שלח קישור תקין (URL).\n"
+        f"{SUPPORTED_SITES_MESSAGE}\n"
+        "לחיפוש ביוטיוב לפי טקסט: /search_mode"
+    )
+
+
+def build_search_results_keyboard(results):
+    """בונה מקלדת עם תוצאות חיפוש יוטיוב."""
+    keyboard = [
+        [InlineKeyboardButton(
+            format_search_result_button_text(index, result),
+            callback_data=f'search_pick_{index}'
+        )]
+        for index, result in enumerate(results)
+    ]
+    keyboard.append([InlineKeyboardButton("❌ ביטול", callback_data='cancel')])
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def handle_youtube_text_search(message, context, query):
+    """מחפש ביוטיוב ומציג תוצאות (כולל כפתור ביטול)."""
+    status_message = await message.reply_text('מחפש ביוטיוב... 🔍', quote=True)
+    try:
+        results = await asyncio.to_thread(
+            search_youtube,
+            query,
+            YOUTUBE_SEARCH_RESULTS_LIMIT,
+        )
+    except Exception as e:
+        logger.error(f"YouTube search failed for query '{query}': {e}")
+        await status_message.edit_text('החיפוש נכשל, נסה שוב 😕')
+        return
+
+    if not results:
+        await status_message.edit_text(
+            f'לא מצאתי תוצאות עבור "{query}" 😕\n'
+            'נסה ניסוח אחר, או כבה מצב חיפוש עם /search_mode'
+        )
+        return
+
+    context.user_data['youtube_search_results'] = results
+    context.user_data['youtube_search_query'] = query
+    await status_message.edit_text(
+        f'תוצאות חיפוש עבור "{query}":\nבחר סרטון:',
+        reply_markup=build_search_results_keyboard(results),
+    )
+
+
+async def search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """מפעיל/מכבה מצב חיפוש טקסט חופשי ביוטיוב (פר-משתמש, נשמר לדיסק)."""
+    user_id = update.effective_user.id
+    enabled = not is_search_mode_enabled(context, user_id)
+    context.user_data['search_mode'] = enabled
+    set_search_mode(user_id, enabled)
+    await sync_user_command_menu(
+        context.bot,
+        update.effective_chat.id,
+        enabled,
+    )
+    if enabled:
+        await update.message.reply_text(
+            'מצב חיפוש הופעל 🔍\n'
+            'שלח שם שיר, אמן או כל טקסט — אחפש ביוטיוב.\n'
+            'אם יש קישור בהודעה, אתייחס רק אליו (הורדה).\n'
+            'לכיבוי: /search_mode שוב'
+        )
+    else:
+        await update.message.reply_text(
+            'מצב חיפוש כובה.\n'
+            'שלח קישור להורדה כרגיל.\n'
+            'להפעלה מחדש: /search_mode'
+        )
+
+
+async def begin_youtube_download_flow(message, context, url, *, edit_existing=False):
+    """מתחיל את זרימת הבחירה (אודיו/וידאו) לקישור יוטיוב."""
+    context.user_data['current_url'] = url
+    context.user_data['is_youtube'] = True
+    context.user_data.pop('youtube_quality_options', None)
+    context.user_data.pop('youtube_download_options', None)
+    context.user_data.pop('youtube_prefetch_task', None)
+    context.user_data.pop('youtube_prefetch_url', None)
+    context.user_data.pop('current_quality_index', None)
+
+    prompt = (
+        'מה להוריד לך? נא לבחור\n'
+        '(איכויות הווידאו נבדקות ברקע...)'
+    )
+    if edit_existing:
+        status_message = await message.edit_text(
+            prompt,
+            reply_markup=build_format_keyboard(),
+        )
+    else:
+        status_message = await message.reply_text(
+            prompt,
+            reply_markup=build_format_keyboard(),
+            quote=True,
+        )
+
+    prefetch_task = start_youtube_download_options_prefetch(context, url)
+    prefetch_task.add_done_callback(
+        lambda completed_task: asyncio.create_task(
+            notify_youtube_prefetch_ready(context, url, status_message, completed_task)
+        )
+    )
+    return status_message
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    search_mode_on = is_search_mode_enabled(context, update.effective_user.id)
+    await sync_user_command_menu(
+        context.bot,
+        update.effective_chat.id,
+        search_mode_on,
+    )
     await update.message.reply_text(
         'שלום! 👋\n'
         f'{SUPPORTED_SITES_MESSAGE}\n'
-        'פשוט שלח לי קישור ואני אשאל אותך אם תרצה להוריד אודיו או וידאו.\n'
-        'עבור סרטוני יוטיוב תוכל גם לבחור איכות.'
+        'שלח קישור להורדה, או /search_mode לחיפוש ביוטיוב לפי טקסט.\n'
+        'עזרה מלאה ופקודות: /help'
+    )
+
+
+def build_file_limit_summary() -> str:
+    """שורת מצב מגבלת קבצים (מידע בלבד — המשתמש לא יכול לשנות זאת)."""
+    file_size_gb = MAX_FILE_SIZE / (1024 * 1024 * 1024)
+    file_size_mb = MAX_FILE_SIZE / (1024 * 1024)
+    if file_size_gb >= 1:
+        return f'מגבלת קבצים נוכחית: עד {file_size_gb:.1f}GB (Local API)'
+    return f'מגבלת קבצים נוכחית: עד {file_size_mb:.0f}MB (Telegram רגיל)'
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """עזרה כללית: מה הבוט עושה, פקודות, ומגבלת קבצים."""
+    search_mode_on = is_search_mode_enabled(context, update.effective_user.id)
+    await sync_user_command_menu(
+        context.bot,
+        update.effective_chat.id,
+        search_mode_on,
+    )
+    search_status = 'דלוק 🔍' if search_mode_on else 'כבוי'
+    await update.message.reply_text(
+        '🤖 עזרה\n\n'
+        f'{SUPPORTED_SITES_MESSAGE}\n\n'
+        'איך משתמשים:\n'
+        '• שלח קישור — אשאל אודיו/וידאו (וביוטיוב גם איכות)\n'
+        '• חיפוש לפי שם שיר/אמן — הפעל /search_mode ואז שלח טקסט\n'
+        '• אם יש קישור בהודעה, אתייחס רק אליו\n\n'
+        'פקודות:\n'
+        '/start — הודעת פתיחה\n'
+        '/help — העזרה הזאת\n'
+        '/search_mode — הפעלה/כיבוי חיפוש טקסט (כרגע: '
+        f'{search_status})\n'
+        '/stop — ביטול הורדה פעילה או ממתינה בתור\n'
+        '/version — גרסה נוכחית ושינויים\n\n'
+        f'{build_file_limit_summary()}'
     )
 
 async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -167,61 +392,52 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         text = ""
     
-    # בדיקות מקדימות
-    is_thank = is_thank_you_message(text) if text else False
     words = text.split() if text else []
     valid_urls = [word for word in words if is_valid_url(word)]
-    
-    # מבצע את הפעולות הנדרשות
-    if is_thank:
-        # שולח תודה
-        await handle_thank_you(update, context)
-    
+    search_mode_on = is_search_mode_enabled(context, update.effective_user.id)
+
+    # קישור תמיד מנצח — גם אם יש מסביב טקסט ארוך / "תודה" / מצב חיפוש דלוק
     if valid_urls:
-        # מתייחס לקישור הראשון שנמצא
         url = valid_urls[0]
+        context.user_data.pop('youtube_search_results', None)
+        context.user_data.pop('youtube_search_query', None)
         context.user_data['current_url'] = url
         context.user_data.pop('youtube_quality_options', None)
         context.user_data.pop('youtube_download_options', None)
         context.user_data.pop('youtube_prefetch_task', None)
         context.user_data.pop('youtube_prefetch_url', None)
         context.user_data.pop('current_quality_index', None)
-        
-        # בדיקה האם זה קישור יוטיוב
+
         is_youtube = 'youtube.com' in url or 'youtu.be' in url
         context.user_data['is_youtube'] = is_youtube
-        
-        # אם יש יותר מקישור אחד, שולח הודעת הבהרה
+
         if len(valid_urls) > 1:
             await message.reply_text(
                 "זיהיתי מספר קישורים בהודעה שלך. אני אוריד את התוכן מהקישור הראשון.\n"
                 "אם תרצה להוריד גם מהקישורים הנוספים, אנא שלח כל קישור בהודעה נפרדת 😊",
                 quote=True
             )
-        
+
         if is_youtube:
-            # quote=True - כדי שהודעת "מה להוריד" תישאר מקושרת לקישור המקורי
-            # ולא תלך לאיבוד בין הודעות אחרות בצ'אט.
-            status_message = await message.reply_text(
-                'מה להוריד לך? נא לבחור\n'
-                '(איכויות הווידאו נבדקות ברקע...)',
-                reply_markup=build_format_keyboard(),
-                quote=True
-            )
-            prefetch_task = start_youtube_download_options_prefetch(context, url)
-            prefetch_task.add_done_callback(
-                lambda completed_task: asyncio.create_task(
-                    notify_youtube_prefetch_ready(context, url, status_message, completed_task)
-                )
-            )
+            await begin_youtube_download_flow(message, context, url)
         else:
             await message.reply_text('מה תרצה להוריד?', reply_markup=build_format_keyboard(), quote=True)
-    elif not is_thank:
-        # אם אין URL וגם אין תודה, שולח הודעת הסבר
-        await message.reply_text(
-            "אנא שלח קישור תקין (URL).\n"
-            f"{SUPPORTED_SITES_MESSAGE}"
-        )
+        return
+
+    # בלי קישור: מצב חיפוש → חיפוש (כולל "תודה עוזי חיטמן")
+    if search_mode_on:
+        if is_searchable_text(text):
+            await handle_youtube_text_search(message, context, text.strip())
+        else:
+            await message.reply_text(build_unrecognized_input_message(search_mode_on=True))
+        return
+
+    # מצב רגיל (חיפוש כבוי): תודה כמו פעם, אחרת הודעת קישור
+    if text and is_thank_you_message(text):
+        await handle_thank_you(update, context)
+        return
+
+    await message.reply_text(build_unrecognized_input_message(search_mode_on=False))
 
 def build_quality_keyboard(quality_options):
     """בונה מקלדת בחירת איכות."""
@@ -493,7 +709,34 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == 'cancel':
         clear_download_state(context)
         await query.answer('בוטל')
-        await query.message.edit_text('בוטל. אפשר לשלוח קישור חדש.')
+        await query.message.edit_text('בוטל. אפשר לשלוח קישור או חיפוש חדש.')
+        return
+
+    if query.data.startswith('search_pick_'):
+        try:
+            result_index = int(query.data.split('_')[-1])
+        except ValueError:
+            await query.answer('בחירה לא תקפה')
+            return
+
+        results = context.user_data.get('youtube_search_results') or []
+        if result_index >= len(results):
+            await query.answer('בחירה לא תקפה')
+            await query.message.edit_text('התוצאות כבר לא תקפות. שלח חיפוש חדש.')
+            return
+
+        picked = results[result_index]
+        url = picked['url']
+        context.user_data.pop('youtube_search_results', None)
+        context.user_data.pop('youtube_search_query', None)
+
+        await query.answer()
+        await begin_youtube_download_flow(
+            query.message,
+            context,
+            url,
+            edit_existing=True,
+        )
         return
 
     if query.data.startswith('batch_count_'):
@@ -706,17 +949,17 @@ async def version(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """הצגת מידע על המצב הנוכחי של הבוט"""
+    """ניטור פנימי: מצב שרת / מגבלת קבצים (לא בתפריט הפקודות)."""
     file_size_gb = MAX_FILE_SIZE / (1024 * 1024 * 1024)
     file_size_mb = MAX_FILE_SIZE / (1024 * 1024)
-    
+
     if file_size_gb >= 1:
         mode_text = f"🚀 **מצב מתקדם** - מגבלת קבצים: {file_size_gb:.1f}GB"
         server_text = "✅ Local API Server זמין"
     else:
         mode_text = f"📱 **מצב פשוט** - מגבלת קבצים: {file_size_mb:.0f}MB"
         server_text = "❌ Local API Server לא זמין"
-    
+
     message = f"""🤖 **מצב הבוט הנוכחי:**
 
 {mode_text}
@@ -729,5 +972,5 @@ async def mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💡 **אפשרויות הפעלה:**
 • `run_bot_simple_50MB` - תמיד 50MB
 • `run_bot_advanced_2GB` - חכם עם auto-fallback"""
-    
-    await update.message.reply_text(message, parse_mode='Markdown') 
+
+    await update.message.reply_text(message, parse_mode='Markdown')

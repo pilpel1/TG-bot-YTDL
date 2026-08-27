@@ -75,10 +75,15 @@ FACEBOOK_COOKIES_FILE = Path(os.getenv('FACEBOOK_COOKIES_FILE', 'facebook_cookie
 # (סופיים באמת) לא מוגבלים בזה.
 MAX_MIX_DOWNLOAD_LIMIT = 100
 
+# חיפוש יוטיוב בטקסט חופשי
+YOUTUBE_SEARCH_RESULTS_LIMIT = 5
+YOUTUBE_SEARCH_MIN_QUERY_LENGTH = 3
+YOUTUBE_SEARCH_MAX_QUERY_LENGTH = 100
+
 # Version info
-VERSION = "0.8.2"
-CHANGELOG = """🆕 גרסה 0.8.2:
-🛑 פקודת /stop - עוצרת הורדה פעילה, לא רק כפתורי בחירה
-• עוצרת גם הורדה שכבר באמצע קובץ, לא רק ג'ובים שממתינים בתור
-• בפלייליסט: עוצרת מיד את הזרימה בין סרטון לסרטון, ומראה כמה הספיקו לרדת
-• עובד גם דרך התערבות ב-yt-dlp עצמו (progress_hook), לא רק ביטול טכני של המשימה ברקע"""
+VERSION = "0.9.0"
+CHANGELOG = """🆕 גרסה 0.9.0:
+🔍 מצב חיפוש חדש ביוטיוב
+• /search_mode מפעיל או מכבה חיפוש לפי טקסט (שם שיר/אמן)
+• הפקודות זמינות מתפריט / בטלגרם
+• /help — עזרה ופירוט פקודות"""

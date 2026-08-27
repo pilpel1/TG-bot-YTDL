@@ -118,6 +118,77 @@ def count_playlist_entries(playlist_info):
     return sum(1 for entry in entries if entry is not None)
 
 
+def format_duration_short(seconds):
+    """ממיר שניות לפורמט קצר לתצוגה (m:ss או h:mm:ss)."""
+    if not seconds:
+        return ''
+    total = int(seconds)
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f'{hours}:{minutes:02d}:{secs:02d}'
+    return f'{minutes}:{secs:02d}'
+
+
+def build_youtube_watch_url(video_id):
+    """בונה קישור watch סטנדרטי מ-video ID."""
+    return f'https://www.youtube.com/watch?v={video_id}'
+
+
+def search_youtube(query, limit=5):
+    """מחפש ביוטיוב דרך yt-dlp (ytsearchN:) ומחזיר רשימת תוצאות שטוחות."""
+    search_url = f'ytsearch{limit}:{query}'
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': True,
+        'skip_download': True,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(search_url, download=False)
+
+    results = []
+    for entry in (info or {}).get('entries') or []:
+        if not entry:
+            continue
+        video_id = entry.get('id')
+        if not video_id:
+            continue
+        results.append({
+            'id': video_id,
+            'title': entry.get('title') or 'ללא כותרת',
+            'uploader': entry.get('uploader') or entry.get('channel') or '',
+            'url': build_youtube_watch_url(video_id),
+            'duration': entry.get('duration'),
+        })
+    return results
+
+
+def format_search_result_button_text(index, result):
+    """בונה טקסט קצר לכפתור inline של תוצאת חיפוש (מגבלת 64 תווים של טלגרם)."""
+    title = (result.get('title') or 'ללא כותרת').strip()
+    if len(title) > 35:
+        title = f'{title[:32]}...'
+
+    label = f'{index + 1}. {title}'
+    suffix_parts = []
+    uploader = (result.get('uploader') or '').strip()
+    if uploader:
+        if len(uploader) > 15:
+            uploader = f'{uploader[:12]}...'
+        suffix_parts.append(uploader)
+
+    duration = format_duration_short(result.get('duration'))
+    if duration:
+        suffix_parts.append(duration)
+
+    if suffix_parts:
+        label = f'{label} ({", ".join(suffix_parts)})'
+
+    return label[:64]
+
+
 def build_youtube_quality_option(height):
     """בונה אפשרות איכות דינמית לפי רזולוציה."""
     return {

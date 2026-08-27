@@ -4,8 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from telegram import Update, Message, Chat, User, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from bot_handlers import (
-    is_valid_url, is_preferred_platform, is_thank_you_message,
-    start, ask_format, button_click, handle_thank_you, stop_download
+    is_valid_url, is_preferred_platform, is_thank_you_message, is_searchable_text,
+    start, ask_format, button_click, handle_thank_you, stop_download, search_mode,
+    help_command, build_search_results_keyboard, build_bot_commands,
 )
 from config import YOUTUBE_QUALITY_LEVELS
 from download_manager import (
@@ -23,6 +24,9 @@ from utils import (
     pick_best_youtube_audio_format,
     estimate_media_size,
     format_file_size,
+    search_youtube,
+    format_duration_short,
+    format_search_result_button_text,
 )
 
 # Fixtures
@@ -40,6 +44,7 @@ def mock_update():
     message.from_user = user
     update.message = message
     update.effective_chat = chat
+    update.effective_user = user
     
     # Mock async methods
     update.message.reply_text = AsyncMock()
@@ -54,6 +59,8 @@ def mock_update():
 def mock_context():
     context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
     context.user_data = {}
+    context.bot = MagicMock()
+    context.bot.set_my_commands = AsyncMock()
     return context
 
 # URL Validation Tests
@@ -104,6 +111,23 @@ async def test_start_command(mock_update, mock_context):
     await start(mock_update, mock_context)
     mock_update.message.reply_text.assert_called_once()
     assert "שלום!" in mock_update.message.reply_text.call_args[0][0]
+    assert "/help" in mock_update.message.reply_text.call_args[0][0]
+
+@pytest.mark.asyncio
+async def test_help_command(mock_update, mock_context):
+    await help_command(mock_update, mock_context)
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "/search_mode" in text
+    assert "/stop" in text
+    assert "/version" in text
+    assert "מגבלת קבצים" in text
+    assert "כבוי" in text
+
+@pytest.mark.asyncio
+async def test_help_command_shows_search_mode_on(mock_update, mock_context):
+    mock_context.user_data['search_mode'] = True
+    await help_command(mock_update, mock_context)
+    assert "דלוק" in mock_update.message.reply_text.call_args[0][0]
 
 # Format Selection Tests
 @pytest.mark.asyncio
@@ -121,10 +145,240 @@ async def test_ask_format_with_valid_youtube_url(mock_update, mock_context):
 
 @pytest.mark.asyncio
 async def test_ask_format_with_invalid_url(mock_update, mock_context):
-    mock_update.message.text = "not_a_url"
+    mock_update.message.text = "x"
     await ask_format(mock_update, mock_context)
     mock_update.message.reply_text.assert_called_once()
     assert "אנא שלח קישור תקין" in mock_update.message.reply_text.call_args[0][0]
+    assert "/search_mode" in mock_update.message.reply_text.call_args[0][0]
+
+@pytest.mark.asyncio
+async def test_ask_format_free_text_without_search_mode_does_not_search(mock_update, mock_context):
+    mock_update.message.text = "חנן בן ארי תותים"
+    with patch('bot_handlers.search_youtube') as mock_search:
+        await ask_format(mock_update, mock_context)
+
+    mock_search.assert_not_called()
+    assert "אנא שלח קישור תקין" in mock_update.message.reply_text.call_args[0][0]
+
+@pytest.mark.asyncio
+async def test_ask_format_with_search_query(mock_update, mock_context):
+    mock_context.user_data['search_mode'] = True
+    mock_update.message.text = "חנן בן ארי תותים"
+    mock_results = [{
+        'id': 'abc123',
+        'title': 'תותים',
+        'uploader': 'חנן בן ארי',
+        'url': 'https://www.youtube.com/watch?v=abc123',
+        'duration': 245,
+    }]
+    with patch('bot_handlers.search_youtube', return_value=mock_results):
+        await ask_format(mock_update, mock_context)
+
+    assert mock_update.message.reply_text.call_count == 1
+    assert "מחפש ביוטיוב" in mock_update.message.reply_text.call_args[0][0]
+    status_message = mock_update.message.reply_text.return_value
+    status_message.edit_text.assert_awaited_once()
+    edit_args = status_message.edit_text.call_args
+    assert 'תוצאות חיפוש' in edit_args[0][0]
+    assert isinstance(edit_args[1]['reply_markup'], InlineKeyboardMarkup)
+    assert mock_context.user_data['youtube_search_results'] == mock_results
+
+@pytest.mark.asyncio
+async def test_ask_format_with_search_no_results_shows_no_results_message(mock_update, mock_context):
+    mock_context.user_data['search_mode'] = True
+    mock_update.message.text = "xyzxyzxyz לא קיים"
+    with patch('bot_handlers.search_youtube', return_value=[]):
+        await ask_format(mock_update, mock_context)
+
+    status_message = mock_update.message.reply_text.return_value
+    status_message.edit_text.assert_awaited_once()
+    assert 'לא מצאתי תוצאות' in status_message.edit_text.call_args[0][0]
+
+@pytest.mark.asyncio
+async def test_ask_format_search_mode_includes_thank_you_in_query(mock_update, mock_context):
+    mock_context.user_data['search_mode'] = True
+    mock_update.message.text = "תודה עוזי חיטמן"
+    mock_results = [{
+        'id': 'abc123',
+        'title': 'תודה',
+        'uploader': 'עוזי חיטמן',
+        'url': 'https://www.youtube.com/watch?v=abc123',
+        'duration': 200,
+    }]
+    with patch('bot_handlers.search_youtube', return_value=mock_results) as mock_search, \
+         patch('bot_handlers.handle_thank_you', new=AsyncMock()) as mock_thank:
+        await ask_format(mock_update, mock_context)
+
+    mock_thank.assert_not_called()
+    mock_search.assert_called_once_with("תודה עוזי חיטמן", 5)
+
+@pytest.mark.asyncio
+async def test_ask_format_thank_you_without_search_mode(mock_update, mock_context):
+    mock_update.message.text = "תודה"
+    with patch('bot_handlers.search_youtube') as mock_search, \
+         patch('bot_handlers.handle_thank_you', new=AsyncMock()) as mock_thank:
+        await ask_format(mock_update, mock_context)
+
+    mock_search.assert_not_called()
+    mock_thank.assert_awaited_once()
+
+@pytest.mark.asyncio
+async def test_ask_format_url_wins_even_with_surrounding_text_in_search_mode(mock_update, mock_context):
+    mock_context.user_data['search_mode'] = True
+    mock_update.message.text = "תודה רבה על הסרטון https://www.youtube.com/watch?v=dQw4w9WgXcQ מעולה"
+    with patch('bot_handlers.start_youtube_download_options_prefetch') as mock_prefetch, \
+         patch('bot_handlers.search_youtube') as mock_search, \
+         patch('bot_handlers.handle_thank_you', new=AsyncMock()) as mock_thank:
+        await ask_format(mock_update, mock_context)
+
+    mock_search.assert_not_called()
+    mock_thank.assert_not_called()
+    mock_prefetch.assert_called_once_with(
+        mock_context,
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    )
+
+@pytest.mark.asyncio
+async def test_ask_format_with_too_long_text_skips_search(mock_update, mock_context):
+    mock_context.user_data['search_mode'] = True
+    mock_update.message.text = "א" * 101
+    with patch('bot_handlers.search_youtube') as mock_search:
+        await ask_format(mock_update, mock_context)
+
+    mock_search.assert_not_called()
+    assert "לא הצלחתי להבין" in mock_update.message.reply_text.call_args[0][0]
+
+@pytest.mark.asyncio
+async def test_ask_format_with_digits_only_skips_search(mock_update, mock_context):
+    mock_context.user_data['search_mode'] = True
+    mock_update.message.text = "12345"
+    with patch('bot_handlers.search_youtube') as mock_search:
+        await ask_format(mock_update, mock_context)
+
+    mock_search.assert_not_called()
+    assert "לא הצלחתי להבין" in mock_update.message.reply_text.call_args[0][0]
+
+@pytest.mark.asyncio
+async def test_search_mode_command_toggles(mock_update, mock_context):
+    with patch('bot_handlers.set_search_mode') as mock_save:
+        await search_mode(mock_update, mock_context)
+        assert mock_context.user_data['search_mode'] is True
+        assert "הופעל" in mock_update.message.reply_text.call_args[0][0]
+        mock_save.assert_called_with(987654321, True)
+        mock_context.bot.set_my_commands.assert_awaited()
+        commands = mock_context.bot.set_my_commands.call_args[0][0]
+        search_cmd = next(c for c in commands if c.command == 'search_mode')
+        assert 'פעיל כעת' in search_cmd.description
+
+        await search_mode(mock_update, mock_context)
+        assert mock_context.user_data['search_mode'] is False
+        assert "כובה" in mock_update.message.reply_text.call_args[0][0]
+        mock_save.assert_called_with(987654321, False)
+        commands = mock_context.bot.set_my_commands.call_args[0][0]
+        search_cmd = next(c for c in commands if c.command == 'search_mode')
+        assert 'כבוי כעת' in search_cmd.description
+
+@pytest.mark.asyncio
+async def test_search_mode_restored_from_disk_after_empty_user_data(mock_update, mock_context):
+    """אחרי ריסטארט user_data ריק — נטען מ-JSON לפני החלטה על חיפוש."""
+    mock_update.message.text = "חנן בן ארי תותים"
+    with patch('bot_handlers.get_search_mode', return_value=True), \
+         patch('bot_handlers.search_youtube', return_value=[{
+             'id': 'abc', 'title': 't', 'uploader': 'u',
+             'url': 'https://www.youtube.com/watch?v=abc', 'duration': 1,
+         }]):
+        await ask_format(mock_update, mock_context)
+
+    assert mock_context.user_data['search_mode'] is True
+    assert "מחפש ביוטיוב" in mock_update.message.reply_text.call_args[0][0]
+
+def test_build_bot_commands_reflects_search_mode_status():
+    off_commands = build_bot_commands(False)
+    on_commands = build_bot_commands(True)
+    off_search = next(c for c in off_commands if c.command == 'search_mode')
+    on_search = next(c for c in on_commands if c.command == 'search_mode')
+    assert off_search.description == 'מצב חיפוש (כבוי כעת)'
+    assert on_search.description == 'מצב חיפוש (פעיל כעת)'
+
+@pytest.mark.asyncio
+async def test_button_click_search_pick_starts_youtube_flow(mock_update, mock_context):
+    mock_update.callback_query = AsyncMock()
+    mock_update.callback_query.data = "search_pick_0"
+    mock_update.callback_query.message = MagicMock()
+    mock_update.callback_query.message.edit_text = AsyncMock()
+    mock_context.user_data = {
+        'youtube_search_results': [{
+            'id': 'abc123',
+            'title': 'תותים',
+            'uploader': 'חנן בן ארי',
+            'url': 'https://www.youtube.com/watch?v=abc123',
+            'duration': 245,
+        }]
+    }
+
+    with patch('bot_handlers.start_youtube_download_options_prefetch') as mock_prefetch:
+        await button_click(mock_update, mock_context)
+
+    mock_update.callback_query.answer.assert_called_once()
+    mock_update.callback_query.message.edit_text.assert_called_once()
+    assert "מה להוריד לך?" in mock_update.callback_query.message.edit_text.call_args[0][0]
+    mock_prefetch.assert_called_once_with(
+        mock_context,
+        'https://www.youtube.com/watch?v=abc123'
+    )
+    assert mock_context.user_data['current_url'] == 'https://www.youtube.com/watch?v=abc123'
+    assert 'youtube_search_results' not in mock_context.user_data
+
+def test_is_searchable_text():
+    assert is_searchable_text('abc') is True
+    assert is_searchable_text('חנן בן ארי') is True
+    assert is_searchable_text('ab') is False
+    assert is_searchable_text('x') is False
+    assert is_searchable_text('') is False
+    assert is_searchable_text('   ') is False
+    assert is_searchable_text('12345') is False
+    assert is_searchable_text('א' * 101) is False
+
+def test_format_duration_short():
+    assert format_duration_short(None) == ''
+    assert format_duration_short(65) == '1:05'
+    assert format_duration_short(3661) == '1:01:01'
+
+def test_format_search_result_button_text_truncates_long_title():
+    result = {
+        'title': 'A' * 50,
+        'uploader': 'Artist Name Here',
+        'duration': 125,
+    }
+    label = format_search_result_button_text(0, result)
+    assert label.startswith('1.')
+    assert len(label) <= 64
+
+def test_build_search_results_keyboard_has_cancel():
+    results = [{'title': 'Song', 'uploader': 'Artist', 'duration': 60}]
+    keyboard = build_search_results_keyboard(results)
+    last_row = keyboard.inline_keyboard[-1]
+    assert last_row[0].callback_data == 'cancel'
+
+def test_search_youtube_parses_flat_entries():
+    fake_info = {
+        'entries': [
+            {'id': 'vid1', 'title': 'First', 'uploader': 'Channel A', 'duration': 100},
+            {'id': None},
+            {'id': 'vid2', 'title': 'Second', 'channel': 'Channel B'},
+        ]
+    }
+    with patch('utils.yt_dlp.YoutubeDL') as mock_ydl_class:
+        mock_ydl = MagicMock()
+        mock_ydl.__enter__.return_value = mock_ydl
+        mock_ydl.extract_info.return_value = fake_info
+        mock_ydl_class.return_value = mock_ydl
+
+        results = search_youtube('test query', limit=3)
+
+    assert len(results) == 2
+    assert results[0]['url'] == 'https://www.youtube.com/watch?v=vid1'
+    assert results[1]['uploader'] == 'Channel B'
 
 @pytest.mark.asyncio
 async def test_ask_format_with_multiple_urls(mock_update, mock_context):
@@ -155,10 +409,16 @@ async def test_ask_format_with_empty_message(mock_update, mock_context):
 
 @pytest.mark.asyncio
 async def test_ask_format_with_thank_you_and_url(mock_update, mock_context):
+    """קישור מנצח — גם עם 'תודה' בהודעה, רק הורדה (בלי תגובת תודה)."""
     mock_update.message.text = "תודה https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    with patch('bot_handlers.start_youtube_download_options_prefetch'):
+    with patch('bot_handlers.start_youtube_download_options_prefetch') as mock_prefetch, \
+         patch('bot_handlers.handle_thank_you', new=AsyncMock()) as mock_thank:
         await ask_format(mock_update, mock_context)
-    assert mock_update.message.reply_text.call_count == 2
+
+    mock_thank.assert_not_called()
+    mock_prefetch.assert_called_once()
+    assert mock_update.message.reply_text.call_count == 1
+    assert "מה להוריד לך?" in mock_update.message.reply_text.call_args[0][0]
 
 # Media Message Tests
 @pytest.mark.asyncio
@@ -324,7 +584,7 @@ async def test_button_click_cancel_clears_download_state(mock_update, mock_conte
 
     assert mock_context.user_data == {}
     mock_update.callback_query.answer.assert_called_once_with('בוטל')
-    mock_update.callback_query.message.edit_text.assert_called_once_with('בוטל. אפשר לשלוח קישור חדש.')
+    mock_update.callback_query.message.edit_text.assert_called_once_with('בוטל. אפשר לשלוח קישור או חיפוש חדש.')
 
 
 def test_extract_max_height_from_format():
