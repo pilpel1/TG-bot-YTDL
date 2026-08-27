@@ -44,6 +44,7 @@ def mock_update():
     message.from_user = user
     update.message = message
     update.effective_chat = chat
+    update.effective_user = user
     
     # Mock async methods
     update.message.reply_text = AsyncMock()
@@ -259,20 +260,37 @@ async def test_ask_format_with_digits_only_skips_search(mock_update, mock_contex
 
 @pytest.mark.asyncio
 async def test_search_mode_command_toggles(mock_update, mock_context):
-    await search_mode(mock_update, mock_context)
-    assert mock_context.user_data['search_mode'] is True
-    assert "הופעל" in mock_update.message.reply_text.call_args[0][0]
-    mock_context.bot.set_my_commands.assert_awaited()
-    commands = mock_context.bot.set_my_commands.call_args[0][0]
-    search_cmd = next(c for c in commands if c.command == 'search_mode')
-    assert 'פעיל כעת' in search_cmd.description
+    with patch('bot_handlers.set_search_mode') as mock_save:
+        await search_mode(mock_update, mock_context)
+        assert mock_context.user_data['search_mode'] is True
+        assert "הופעל" in mock_update.message.reply_text.call_args[0][0]
+        mock_save.assert_called_with(987654321, True)
+        mock_context.bot.set_my_commands.assert_awaited()
+        commands = mock_context.bot.set_my_commands.call_args[0][0]
+        search_cmd = next(c for c in commands if c.command == 'search_mode')
+        assert 'פעיל כעת' in search_cmd.description
 
-    await search_mode(mock_update, mock_context)
-    assert mock_context.user_data['search_mode'] is False
-    assert "כובה" in mock_update.message.reply_text.call_args[0][0]
-    commands = mock_context.bot.set_my_commands.call_args[0][0]
-    search_cmd = next(c for c in commands if c.command == 'search_mode')
-    assert 'כבוי כעת' in search_cmd.description
+        await search_mode(mock_update, mock_context)
+        assert mock_context.user_data['search_mode'] is False
+        assert "כובה" in mock_update.message.reply_text.call_args[0][0]
+        mock_save.assert_called_with(987654321, False)
+        commands = mock_context.bot.set_my_commands.call_args[0][0]
+        search_cmd = next(c for c in commands if c.command == 'search_mode')
+        assert 'כבוי כעת' in search_cmd.description
+
+@pytest.mark.asyncio
+async def test_search_mode_restored_from_disk_after_empty_user_data(mock_update, mock_context):
+    """אחרי ריסטארט user_data ריק — נטען מ-JSON לפני החלטה על חיפוש."""
+    mock_update.message.text = "חנן בן ארי תותים"
+    with patch('bot_handlers.get_search_mode', return_value=True), \
+         patch('bot_handlers.search_youtube', return_value=[{
+             'id': 'abc', 'title': 't', 'uploader': 'u',
+             'url': 'https://www.youtube.com/watch?v=abc', 'duration': 1,
+         }]):
+        await ask_format(mock_update, mock_context)
+
+    assert mock_context.user_data['search_mode'] is True
+    assert "מחפש ביוטיוב" in mock_update.message.reply_text.call_args[0][0]
 
 def test_build_bot_commands_reflects_search_mode_status():
     off_commands = build_bot_commands(False)

@@ -14,6 +14,7 @@ from config import (
 )
 from download_manager import download_with_quality, download_playlist
 from download_queue import CancellationToken
+from user_settings import get_search_mode, set_search_mode
 from utils import (
     fetch_youtube_download_options,
     build_youtube_audio_option,
@@ -161,11 +162,16 @@ def is_searchable_text(text: str) -> bool:
     return bool(re.search(r'[a-zA-Z\u0590-\u05FF]', stripped))
 
 
-def is_search_mode_enabled(context) -> bool:
-    """מצב חיפוש כבוי כברירת מחדל - מופעל רק ב-/search_mode.
+def is_search_mode_enabled(context, user_id=None) -> bool:
+    """מצב חיפוש — פר-משתמש, נשמר לדיסק ושורד ריסטארט.
 
-    נשמר ב-context.user_data → פר-משתמש (לא משפיע על משתמשים אחרים)."""
-    return bool(context.user_data.get('search_mode'))
+    קודם נטען מ-user_data (זיכרון); אם עדיין לא נטען בהרצה הנוכחית —
+    נשלף מ-data/search_modes.json. בלי user_id ובלי ערך בזיכרון → כבוי."""
+    if 'search_mode' not in context.user_data:
+        if user_id is None:
+            return False
+        context.user_data['search_mode'] = get_search_mode(user_id)
+    return bool(context.user_data['search_mode'])
 
 
 def build_bot_commands(search_mode_on: bool = False):
@@ -257,9 +263,11 @@ async def handle_youtube_text_search(message, context, query):
 
 
 async def search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """מפעיל/מכבה מצב חיפוש טקסט חופשי ביוטיוב (פר-משתמש ב-user_data)."""
-    enabled = not is_search_mode_enabled(context)
+    """מפעיל/מכבה מצב חיפוש טקסט חופשי ביוטיוב (פר-משתמש, נשמר לדיסק)."""
+    user_id = update.effective_user.id
+    enabled = not is_search_mode_enabled(context, user_id)
     context.user_data['search_mode'] = enabled
+    set_search_mode(user_id, enabled)
     await sync_user_command_menu(
         context.bot,
         update.effective_chat.id,
@@ -315,10 +323,11 @@ async def begin_youtube_download_flow(message, context, url, *, edit_existing=Fa
     return status_message
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    search_mode_on = is_search_mode_enabled(context, update.effective_user.id)
     await sync_user_command_menu(
         context.bot,
         update.effective_chat.id,
-        is_search_mode_enabled(context),
+        search_mode_on,
     )
     await update.message.reply_text(
         'שלום! 👋\n'
@@ -339,7 +348,7 @@ def build_file_limit_summary() -> str:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """עזרה כללית: מה הבוט עושה, פקודות, ומגבלת קבצים."""
-    search_mode_on = is_search_mode_enabled(context)
+    search_mode_on = is_search_mode_enabled(context, update.effective_user.id)
     await sync_user_command_menu(
         context.bot,
         update.effective_chat.id,
@@ -385,7 +394,7 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     words = text.split() if text else []
     valid_urls = [word for word in words if is_valid_url(word)]
-    search_mode_on = is_search_mode_enabled(context)
+    search_mode_on = is_search_mode_enabled(context, update.effective_user.id)
 
     # קישור תמיד מנצח — גם אם יש מסביב טקסט ארוך / "תודה" / מצב חיפוש דלוק
     if valid_urls:
