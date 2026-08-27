@@ -161,12 +161,23 @@ def is_searchable_text(text: str) -> bool:
     return bool(re.search(r'[a-zA-Z\u0590-\u05FF]', stripped))
 
 
-def build_unrecognized_input_message() -> str:
-    """הודעה אחידה לטקסט שלא זוהה כקישור ולא כחיפוש מוצלח."""
+def is_search_mode_enabled(context) -> bool:
+    """מצב חיפוש כבוי כברירת מחדל - מופעל רק ב-/search_mode."""
+    return bool(context.user_data.get('search_mode'))
+
+
+def build_unrecognized_input_message(search_mode_on: bool = False) -> str:
+    """הודעה לטקסט שלא זוהה כקישור (וכשמצב חיפוש כבוי - גם לא כתודה)."""
+    if search_mode_on:
+        return (
+            "לא הצלחתי להבין את ההודעה.\n"
+            "במצב חיפוש שלח שם שיר/אמן (או קישור להורדה).\n"
+            "לכיבוי: /search_mode"
+        )
     return (
-        "לא הצלחתי להבין את ההודעה.\n"
-        "שלח קישור תקין (URL) או חפש ביוטיוב (למשל: שם שיר או אמן) 🔍\n"
-        f"{SUPPORTED_SITES_MESSAGE}"
+        "אנא שלח קישור תקין (URL).\n"
+        f"{SUPPORTED_SITES_MESSAGE}\n"
+        "לחיפוש ביוטיוב לפי טקסט: /search_mode"
     )
 
 
@@ -184,7 +195,7 @@ def build_search_results_keyboard(results):
 
 
 async def handle_youtube_text_search(message, context, query):
-    """מחפש ביוטיוב ומציג תוצאות — או הודעת הסבר גנרית אם אין תוצאות."""
+    """מחפש ביוטיוב ומציג תוצאות (כולל כפתור ביטול)."""
     status_message = await message.reply_text('מחפש ביוטיוב... 🔍', quote=True)
     try:
         results = await asyncio.to_thread(
@@ -198,8 +209,10 @@ async def handle_youtube_text_search(message, context, query):
         return
 
     if not results:
-        # חיפוש ריק = כנראה לא התכוון לחפש — אותה הודעה כמו טקסט לא מזוהה
-        await status_message.edit_text(build_unrecognized_input_message())
+        await status_message.edit_text(
+            f'לא מצאתי תוצאות עבור "{query}" 😕\n'
+            'נסה ניסוח אחר, או כבה מצב חיפוש עם /search_mode'
+        )
         return
 
     context.user_data['youtube_search_results'] = results
@@ -208,6 +221,25 @@ async def handle_youtube_text_search(message, context, query):
         f'תוצאות חיפוש עבור "{query}":\nבחר סרטון:',
         reply_markup=build_search_results_keyboard(results),
     )
+
+
+async def search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """מפעיל/מכבה מצב חיפוש טקסט חופשי ביוטיוב."""
+    enabled = not is_search_mode_enabled(context)
+    context.user_data['search_mode'] = enabled
+    if enabled:
+        await update.message.reply_text(
+            'מצב חיפוש הופעל 🔍\n'
+            'שלח שם שיר, אמן או כל טקסט — אחפש ביוטיוב.\n'
+            'אם יש קישור בהודעה, אתייחס רק אליו (הורדה).\n'
+            'לכיבוי: /search_mode שוב'
+        )
+    else:
+        await update.message.reply_text(
+            'מצב חיפוש כובה.\n'
+            'שלח קישור להורדה כרגיל.\n'
+            'להפעלה מחדש: /search_mode'
+        )
 
 
 async def begin_youtube_download_flow(message, context, url, *, edit_existing=False):
@@ -248,9 +280,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         'שלום! 👋\n'
         f'{SUPPORTED_SITES_MESSAGE}\n'
-        'שלח לי קישור — או חפש ביוטיוב בטקסט חופשי (למשל: שם שיר או אמן) 🔍\n'
-        'אחרי זה אשאל אם תרצה להוריד אודיו או וידאו.\n'
-        'עבור סרטוני יוטיוב תוכל גם לבחור איכות.'
+        'פשוט שלח לי קישור ואני אשאל אותך אם תרצה להוריד אודיו או וידאו.\n'
+        'עבור סרטוני יוטיוב תוכל גם לבחור איכות.\n'
+        'לחיפוש ביוטיוב לפי טקסט (שם שיר/אמן): /search_mode'
     )
 
 async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -273,18 +305,12 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         text = ""
     
-    # בדיקות מקדימות
-    is_thank = is_thank_you_message(text) if text else False
     words = text.split() if text else []
     valid_urls = [word for word in words if is_valid_url(word)]
-    
-    # מבצע את הפעולות הנדרשות
-    if is_thank:
-        # שולח תודה
-        await handle_thank_you(update, context)
-    
+    search_mode_on = is_search_mode_enabled(context)
+
+    # קישור תמיד מנצח — גם אם יש מסביב טקסט ארוך / "תודה" / מצב חיפוש דלוק
     if valid_urls:
-        # מתייחס לקישור הראשון שנמצא
         url = valid_urls[0]
         context.user_data.pop('youtube_search_results', None)
         context.user_data.pop('youtube_search_query', None)
@@ -294,27 +320,37 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('youtube_prefetch_task', None)
         context.user_data.pop('youtube_prefetch_url', None)
         context.user_data.pop('current_quality_index', None)
-        
-        # בדיקה האם זה קישור יוטיוב
+
         is_youtube = 'youtube.com' in url or 'youtu.be' in url
         context.user_data['is_youtube'] = is_youtube
-        
-        # אם יש יותר מקישור אחד, שולח הודעת הבהרה
+
         if len(valid_urls) > 1:
             await message.reply_text(
                 "זיהיתי מספר קישורים בהודעה שלך. אני אוריד את התוכן מהקישור הראשון.\n"
                 "אם תרצה להוריד גם מהקישורים הנוספים, אנא שלח כל קישור בהודעה נפרדת 😊",
                 quote=True
             )
-        
+
         if is_youtube:
             await begin_youtube_download_flow(message, context, url)
         else:
             await message.reply_text('מה תרצה להוריד?', reply_markup=build_format_keyboard(), quote=True)
-    elif is_searchable_text(text) and not is_thank:
-        await handle_youtube_text_search(message, context, text.strip())
-    elif not is_thank:
-        await message.reply_text(build_unrecognized_input_message())
+        return
+
+    # בלי קישור: מצב חיפוש → חיפוש (כולל "תודה עוזי חיטמן")
+    if search_mode_on:
+        if is_searchable_text(text):
+            await handle_youtube_text_search(message, context, text.strip())
+        else:
+            await message.reply_text(build_unrecognized_input_message(search_mode_on=True))
+        return
+
+    # מצב רגיל (חיפוש כבוי): תודה כמו פעם, אחרת הודעת קישור
+    if text and is_thank_you_message(text):
+        await handle_thank_you(update, context)
+        return
+
+    await message.reply_text(build_unrecognized_input_message(search_mode_on=False))
 
 def build_quality_keyboard(quality_options):
     """בונה מקלדת בחירת איכות."""
