@@ -945,4 +945,32 @@ async def version(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📚 לגרסאות קודמות: <a href=\"{VERSIONS_URL}\">צפייה ב-GitHub</a>",
         parse_mode='HTML',
         disable_web_page_preview=True
-    ) 
+    )
+
+
+async def mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ניטור פנימי: מצב שרת / מגבלת קבצים (לא בתפריט הפקודות)."""
+    file_size_gb = MAX_FILE_SIZE / (1024 * 1024 * 1024)
+    file_size_mb = MAX_FILE_SIZE / (1024 * 1024)
+
+    if file_size_gb >= 1:
+        mode_text = f"🚀 **מצב מתקדם** - מגבלת קבצים: {file_size_gb:.1f}GB"
+        server_text = "✅ Local API Server זמין"
+    else:
+        mode_text = f"📱 **מצב פשוט** - מגבלת קבצים: {file_size_mb:.0f}MB"
+        server_text = "❌ Local API Server לא זמין"
+
+    message = f"""🤖 **מצב הבוט הנוכחי:**
+
+{mode_text}
+{server_text}
+
+ℹ️ **הסבר מצבים:**
+• **מצב פשוט (50MB)**: תמיד עובד עם Telegram API הרגיל
+• **מצב חכם (2GB/50MB)**: מנסה Local Server, אם נכשל עובר ל-50MB
+
+💡 **אפשרויות הפעלה:**
+• `run_bot_simple_50MB` - תמיד 50MB
+• `run_bot_advanced_2GB` - חכם עם auto-fallback"""
+
+    await update.message.reply_text(message, parse_mode='Markdown')

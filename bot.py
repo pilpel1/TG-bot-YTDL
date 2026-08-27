@@ -4,7 +4,7 @@ from telegram.error import NetworkError, TimedOut
 from logger_setup import logger
 from config import BOT_TOKEN, LOCAL_API_AVAILABLE, LOCAL_API_BASE_URL, LOCAL_API_FILE_URL
 from bot_handlers import (
-    start, ask_format, button_click, handle_thank_you, version, help_command,
+    start, ask_format, button_click, handle_thank_you, version, help_command, mode,
     stop_download, search_mode, build_bot_commands,
 )
 from utils import cleanup_temp_files, check_ffmpeg_on_startup
@@ -101,6 +101,7 @@ def main():
         application.add_handler(CommandHandler('start', start))
         application.add_handler(CommandHandler('help', help_command))
         application.add_handler(CommandHandler('version', version))
+        application.add_handler(CommandHandler('mode', mode))  # ניטור פנימי — לא בתפריט
         application.add_handler(CommandHandler('stop', stop_download))
         application.add_handler(CommandHandler('search_mode', search_mode))
         # תפיסת כל סוגי ההודעות חוץ מפקודות
