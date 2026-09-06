@@ -5,11 +5,12 @@ from logger_setup import logger
 from config import BOT_TOKEN, LOCAL_API_AVAILABLE, LOCAL_API_BASE_URL, LOCAL_API_FILE_URL
 from bot_handlers import (
     start, ask_format, button_click, handle_thank_you, version, help_command, mode,
-    stop_download, search_mode, build_bot_commands,
+    stop_download, search_mode, channels_command, build_bot_commands,
 )
 from utils import cleanup_temp_files, check_ffmpeg_on_startup
 from download_queue import DownloadQueue
 from ytdlp_updater import YtdlpUpdateManager
+from channel_watch import ChannelWatchManager
 
 
 async def post_init(application):
@@ -25,6 +26,10 @@ async def post_init(application):
     ytdlp_updater.start()
     application.bot_data['ytdlp_updater'] = ytdlp_updater
 
+    channel_watch = ChannelWatchManager(application)
+    channel_watch.start()
+    application.bot_data['channel_watch'] = channel_watch
+
     # ברירת מחדל גלובלית (כבוי). לכל משתמש מתעדכן תפריט פרטי
     # ב-/search_mode, /start ו-/help דרך BotCommandScopeChat.
     await application.bot.set_my_commands(build_bot_commands(search_mode_on=False))
@@ -39,6 +44,11 @@ async def post_stop(application):
     if ytdlp_updater:
         await ytdlp_updater.stop()
         logger.info("yt-dlp updater stopped")
+
+    channel_watch = application.bot_data.get('channel_watch')
+    if channel_watch:
+        await channel_watch.stop()
+        logger.info("Channel watch stopped")
 
     download_queue = application.bot_data.get('download_queue')
     if download_queue:
@@ -114,6 +124,7 @@ def main():
         application.add_handler(CommandHandler('mode', mode))  # ניטור פנימי — לא בתפריט
         application.add_handler(CommandHandler('stop', stop_download))
         application.add_handler(CommandHandler('search_mode', search_mode))
+        application.add_handler(CommandHandler('channels', channels_command))
         # תפיסת כל סוגי ההודעות חוץ מפקודות
         application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, ask_format))
         application.add_handler(CallbackQueryHandler(button_click))

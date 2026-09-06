@@ -6,7 +6,8 @@ from telegram.ext import ContextTypes
 from bot_handlers import (
     is_valid_url, is_preferred_platform, is_thank_you_message, is_searchable_text,
     start, ask_format, button_click, handle_thank_you, stop_download, search_mode,
-    help_command, build_search_results_keyboard, build_bot_commands,
+    help_command, channels_command, build_search_results_keyboard, build_bot_commands,
+    build_channel_edit_keyboard, build_channels_list_text,
 )
 from config import YOUTUBE_QUALITY_LEVELS
 from download_manager import (
@@ -118,6 +119,7 @@ async def test_help_command(mock_update, mock_context):
     await help_command(mock_update, mock_context)
     text = mock_update.message.reply_text.call_args[0][0]
     assert "/search_mode" in text
+    assert "/channels" in text
     assert "/stop" in text
     assert "/version" in text
     assert "מגבלת קבצים" in text
@@ -299,6 +301,122 @@ def test_build_bot_commands_reflects_search_mode_status():
     on_search = next(c for c in on_commands if c.command == 'search_mode')
     assert off_search.description == 'מצב חיפוש (כבוי כעת)'
     assert on_search.description == 'מצב חיפוש (פעיל כעת)'
+    assert any(c.command == 'channels' for c in off_commands)
+
+
+@pytest.mark.asyncio
+async def test_channels_command_shows_empty_list(mock_update, mock_context):
+    with patch('bot_handlers.list_channel_subs', return_value=[]):
+        await channels_command(mock_update, mock_context)
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert 'אין ערוצים במעקב' in text
+    assert '0/' in text
+
+
+@pytest.mark.asyncio
+async def test_ask_format_channel_wizard_does_not_start_download(mock_update, mock_context):
+    mock_update.message.text = 'https://www.youtube.com/@foo'
+    mock_context.user_data['channel_wizard'] = {'step': 'awaiting_url'}
+    with patch('bot_handlers.handle_channel_wizard_url', new_callable=AsyncMock) as mock_wizard:
+        await ask_format(mock_update, mock_context)
+    mock_wizard.assert_awaited_once()
+    mock_update.message.reply_text.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_channel_wizard_url_starts_sources_step(mock_update, mock_context):
+    from bot_handlers import handle_channel_wizard_url
+    mock_update.message.text = 'https://www.youtube.com/@foo'
+    mock_context.user_data['channel_wizard'] = {'step': 'awaiting_url'}
+    resolved = {
+        'channel_url': 'https://www.youtube.com/@foo',
+        'channel_id': 'UCfoo',
+        'channel_label': 'Foo',
+    }
+    with patch('bot_handlers.is_maintenance_mode', return_value=False), \
+         patch('bot_handlers.find_duplicate_channel', return_value=None), \
+         patch('bot_handlers.list_channel_subs', return_value=[]), \
+         patch('bot_handlers.resolve_channel', return_value=resolved), \
+         patch('bot_handlers.track_ytdlp_metadata'):
+        await handle_channel_wizard_url(mock_update, mock_context, mock_update.message.text)
+    wizard = mock_context.user_data['channel_wizard']
+    assert wizard['step'] == 'sources'
+    assert wizard['channel_label'] == 'Foo'
+    status = mock_update.message.reply_text.return_value
+    assert 'מצאתי: Foo' in status.edit_text.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_button_click_channel_edit_toggle(mock_update, mock_context):
+    mock_update.callback_query = AsyncMock()
+    mock_update.callback_query.data = 'ch_td:0'
+    mock_update.callback_query.from_user = MagicMock()
+    mock_update.callback_query.from_user.id = 7
+    mock_update.callback_query.message = MagicMock()
+    mock_update.callback_query.message.edit_text = AsyncMock()
+    sub = {
+        'channel_label': 'Foo',
+        'channel_url': 'https://www.youtube.com/@foo',
+        'sources': ['videos'],
+        'delivery': ['audio'],
+        'include_description': False,
+    }
+    with patch('bot_handlers.get_channel_sub', side_effect=[sub, {**sub, 'delivery': ['audio', 'video']}]), \
+         patch('bot_handlers.update_channel_sub') as mock_update_sub:
+        await button_click(mock_update, mock_context)
+    mock_update_sub.assert_called_once()
+    assert mock_update_sub.call_args.kwargs['delivery'] == ['audio', 'video']
+    mock_update.callback_query.answer.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_button_click_channel_toggle_keeps_at_least_one(mock_update, mock_context):
+    mock_update.callback_query = AsyncMock()
+    mock_update.callback_query.data = 'ch_ta:0'
+    mock_update.callback_query.from_user = MagicMock()
+    mock_update.callback_query.from_user.id = 7
+    mock_update.callback_query.message = MagicMock()
+    sub = {
+        'channel_label': 'Foo',
+        'channel_url': 'https://www.youtube.com/@foo',
+        'sources': ['videos'],
+        'delivery': ['audio'],
+        'include_description': False,
+    }
+    with patch('bot_handlers.get_channel_sub', return_value=sub), \
+         patch('bot_handlers.update_channel_sub') as mock_update_sub:
+        await button_click(mock_update, mock_context)
+    mock_update_sub.assert_not_called()
+    mock_update.callback_query.answer.assert_awaited()
+    assert mock_update.callback_query.answer.call_args.kwargs.get('show_alert') is True
+
+
+def test_channel_edit_keyboard_marks_current_selection():
+    sub = {
+        'sources': ['videos'],
+        'delivery': ['audio', 'video'],
+        'include_description': False,
+    }
+    markup = build_channel_edit_keyboard(sub, 3)
+    labels = [button.text for row in markup.inline_keyboard for button in row]
+    assert '✓ סרטונים' in labels
+    assert 'שורטס' in labels
+    assert '✓ אודיו' in labels
+    assert '✓ וידאו' in labels
+    assert any(button.callback_data == 'ch_tv:3' for row in markup.inline_keyboard for button in row)
+
+
+def test_channels_list_text_includes_settings_summary():
+    text = build_channels_list_text([{
+        'channel_label': 'Foo',
+        'sources': ['videos', 'shorts'],
+        'delivery': ['audio'],
+        'include_description': True,
+    }])
+    assert 'Foo' in text
+    assert 'סרטונים + שורטס' in text
+    assert 'אודיו' in text
+    assert 'עם תיאור' in text
 
 @pytest.mark.asyncio
 async def test_button_click_search_pick_starts_youtube_flow(mock_update, mock_context):

@@ -97,6 +97,26 @@ def _env_float(name, default):
     return float(raw)
 
 
+def _env_hour_list(name, default):
+    """רשימת שעות 0-23 מופרדות בפסיק. ריק = כבוי."""
+    raw = os.getenv(name)
+    if raw is None:
+        return list(default)
+    if raw.strip() == '':
+        return []
+    hours = []
+    for part in raw.split(','):
+        part = part.strip()
+        if not part:
+            continue
+        hour = int(part)
+        if hour < 0 or hour > 23:
+            raise ValueError(f'{name} hours must be 0-23, got {hour}')
+        if hour not in hours:
+            hours.append(hour)
+    return sorted(hours)
+
+
 YTDLP_UPDATE_HOUR = _env_int('YTDLP_UPDATE_HOUR', 1)
 YTDLP_UPDATE_MAX_WAIT_HOURS = _env_float('YTDLP_UPDATE_MAX_WAIT_HOURS', 4)
 YTDLP_UPDATE_TIMEZONE = os.getenv('YTDLP_UPDATE_TIMEZONE', 'Asia/Jerusalem') or 'Asia/Jerusalem'
@@ -105,10 +125,20 @@ MAINTENANCE_USER_MESSAGE = (
     'הבוט בעבודות תחזוקה עכשיו. נא לשלוח את הקישור שוב בעוד כמה דקות 🔄'
 )
 
+# מעקב ערוצי יוטיוב — cron פנימי. CHANNEL_WATCH_HOURS=8,20 (ברירת מחדל).
+# רשימה ריקה ב-.env מכבה את הבדיקה. איכות וידאו קבועה: "רגילה" (720).
+CHANNEL_WATCH_HOURS = _env_hour_list('CHANNEL_WATCH_HOURS', [8, 20])
+CHANNEL_WATCH_TIMEZONE = (
+    os.getenv('CHANNEL_WATCH_TIMEZONE') or YTDLP_UPDATE_TIMEZONE or 'Asia/Jerusalem'
+)
+CHANNEL_WATCH_FETCH_LIMIT = _env_int('CHANNEL_WATCH_FETCH_LIMIT', 20)
+CHANNEL_WATCH_MAX_PER_USER = _env_int('CHANNEL_WATCH_MAX_PER_USER', 10)
+CHANNEL_WATCH_NOTIFIED_CAP = _env_int('CHANNEL_WATCH_NOTIFIED_CAP', 200)
+
 # Version info
-VERSION = "0.10.0"
-CHANGELOG = """🆕 גרסה 0.10.0:
-⚙️ הבוט כשירות + עדכון yt-dlp אוטומטי
-• בדיקה כל לילה; התקנה רק כשהבוט כבוי
-• מצב תחזוקה בזמן ריקון התור
-• Local API רץ כשירות נפרד (מצב 2GB קבוע)"""
+VERSION = "0.11.0"
+CHANGELOG = """🆕 גרסה 0.11.0:
+📺 מעקב אחרי ערוצי יוטיוב
+• /channels — הוספה, עריכה והסרה של ערוצים
+• בדיקה פנימית ב-08:00 ו-20:00 (ניתן לשינוי)
+• סרטון חדש מגיע עם קישור + אודיו/וידאו לפי מה שבחרת"""
