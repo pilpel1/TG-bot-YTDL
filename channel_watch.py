@@ -128,6 +128,37 @@ def seconds_until_next_watch(now: datetime = None, last_run_at=None) -> float:
     return max(0.0, (upcoming - now).total_seconds())
 
 
+def format_watch_times_he(hours=None) -> str:
+    """'08:00 ו-20:00' / '08:00' / '' אם אין שעות."""
+    hours = list(CHANNEL_WATCH_HOURS if hours is None else hours)
+    labels = [f'{hour:02d}:00' for hour in hours]
+    if not labels:
+        return ''
+    if len(labels) == 1:
+        return labels[0]
+    if len(labels) == 2:
+        return f'{labels[0]} ו-{labels[1]}'
+    return ', '.join(labels[:-1]) + f' ו-{labels[-1]}'
+
+
+def format_watch_schedule_he(hours=None) -> str:
+    """משפט קצר למשתמש: כמה פעמים ביום + באילו שעות.
+
+    נמשך מ-CHANNEL_WATCH_HOURS כדי שאם משנים ב-.env הטקסט יתעדכן לבד.
+    """
+    hours = list(CHANNEL_WATCH_HOURS if hours is None else hours)
+    times = format_watch_times_he(hours)
+    if not hours:
+        return 'הבדיקה האוטומטית כבויה כרגע'
+    if len(hours) == 1:
+        cadence = 'פעם ביום'
+    elif len(hours) == 2:
+        cadence = 'פעמיים ביום'
+    else:
+        cadence = f'{len(hours)} פעמים ביום'
+    return f'{cadence}, ב-{times}'
+
+
 def is_youtube_url(url: str) -> bool:
     try:
         host = (urlparse(url).hostname or '').lower()

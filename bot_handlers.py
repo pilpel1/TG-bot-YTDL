@@ -39,6 +39,7 @@ from channel_watch import (
     sources_label_he,
     delivery_label_he,
     description_label_he,
+    format_watch_schedule_he,
 )
 from utils import (
     fetch_youtube_download_options,
@@ -399,7 +400,7 @@ def build_channels_list_text(subs):
     count = len(subs)
     header = (
         f'מעקב אחרי ערוצי יוטיוב ({count}/{CHANNEL_WATCH_MAX_PER_USER})\n'
-        'כשערוץ מעלה סרטון חדש — תקבל אותו כאן.'
+        f'בודק {format_watch_schedule_he()} — לא ברגע שהסרטון עולה.'
     )
     if not subs:
         return header + '\n\nאין ערוצים במעקב עדיין.'
@@ -491,7 +492,8 @@ def build_wizard_confirm_text(wizard):
         f"מה לעקוב: {sources_label_he(wizard.get('sources'))}\n"
         f"מה לשלוח: {delivery_label_he(wizard.get('delivery'))}\n"
         f"תיאור: {description_label_he(wizard.get('include_description'))}\n\n"
-        'סרטונים שכבר עלו לא יישלחו — רק מה שיעלה מעכשיו.'
+        f'סרטונים שכבר עלו לא יישלחו.\n'
+        f'חדשים יגיעו בבדיקה הבאה ({format_watch_schedule_he()}).'
     )
 
 
@@ -646,7 +648,8 @@ async def finalize_channel_add(message, context, user_id):
         return
     await message.edit_text(
         f"מעכשיו אעקוב אחרי {sub['channel_label']}.\n"
-        'סרטונים חדשים יגיעו לכאן (רק מה שיעלה מעכשיו).',
+        f'סרטונים חדשים יגיעו בבדיקה הבאה ({format_watch_schedule_he()}). '
+        'מה שכבר עלה לא יישלח.',
         disable_web_page_preview=True,
     )
     await show_channels_list(message, user_id)
@@ -866,7 +869,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'שלום! 👋\n'
         f'{SUPPORTED_SITES_MESSAGE}\n'
         'שלח קישור להורדה, או /search_mode לחיפוש ביוטיוב לפי טקסט.\n'
-        'מעקב אחרי ערוץ יוטיוב: /channels\n'
+        f'מעקב ערוץ ({format_watch_schedule_he()}): /channels\n'
         'עזרה מלאה ופקודות: /help'
     )
 
@@ -895,7 +898,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'איך משתמשים:\n'
         '• שלח קישור — אשאל אודיו/וידאו (וביוטיוב גם איכות)\n'
         '• חיפוש לפי שם שיר/אמן — הפעל /search_mode ואז שלח טקסט\n'
-        '• מעקב ערוץ יוטיוב — /channels (סרטון חדש מגיע לכאן)\n'
+        f'• מעקב ערוץ יוטיוב — /channels ({format_watch_schedule_he()}, לא מיידי)\n'
         '• אם יש קישור בהודעה, אתייחס רק אליו\n\n'
         'פקודות:\n'
         '/start — הודעת פתיחה\n'

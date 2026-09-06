@@ -7,6 +7,7 @@ import channel_watch
 from channel_watch import (
     find_new_entries,
     format_new_video_html,
+    format_watch_schedule_he,
     html_link,
     initialize_baselines,
     is_youtube_url,
@@ -171,6 +172,13 @@ def test_seconds_until_next_watch_after_successful_morning_waits_for_evening():
          patch('channel_watch.get_watch_timezone', return_value=timezone.utc):
         delay = seconds_until_next_watch(now, last_run_at=last_run)
     assert 9.9 * 3600 <= delay <= 10.1 * 3600
+
+
+def test_format_watch_schedule_he():
+    assert format_watch_schedule_he([]) == 'הבדיקה האוטומטית כבויה כרגע'
+    assert format_watch_schedule_he([8]) == 'פעם ביום, ב-08:00'
+    assert format_watch_schedule_he([8, 20]) == 'פעמיים ביום, ב-08:00 ו-20:00'
+    assert format_watch_schedule_he([8, 12, 21]) == '3 פעמים ביום, ב-08:00, 12:00 ו-21:00'
 
 
 def test_watch_slots():

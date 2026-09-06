@@ -116,8 +116,12 @@ def test_thank_you_detection(text, expected):
 async def test_start_command(mock_update, mock_context):
     await start(mock_update, mock_context)
     mock_update.message.reply_text.assert_called_once()
-    assert "שלום!" in mock_update.message.reply_text.call_args[0][0]
-    assert "/help" in mock_update.message.reply_text.call_args[0][0]
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert "שלום!" in text
+    assert "/help" in text
+    assert "/channels" in text
+    from channel_watch import format_watch_schedule_he
+    assert format_watch_schedule_he() in text
 
 @pytest.mark.asyncio
 async def test_help_command(mock_update, mock_context):
@@ -125,6 +129,7 @@ async def test_help_command(mock_update, mock_context):
     text = mock_update.message.reply_text.call_args[0][0]
     assert "/search_mode" in text
     assert "/channels" in text
+    assert "לא מיידי" in text
     assert "/stop" in text
     assert "/version" in text
     assert "מגבלת קבצים" in text
@@ -316,6 +321,7 @@ async def test_channels_command_shows_empty_list(mock_update, mock_context):
     text = mock_update.message.reply_text.call_args[0][0]
     assert 'אין ערוצים במעקב' in text
     assert '0/' in text
+    assert 'לא ברגע שהסרטון עולה' in text
 
 
 @pytest.mark.asyncio
@@ -422,6 +428,8 @@ def test_channels_list_text_includes_settings_summary():
     assert 'סרטונים + שורטס' in text
     assert 'אודיו' in text
     assert 'עם תיאור' in text
+    assert 'לא ברגע שהסרטון עולה' in text
+    assert 'בודק' in text
 
 @pytest.mark.asyncio
 async def test_button_click_search_pick_starts_youtube_flow(mock_update, mock_context):
