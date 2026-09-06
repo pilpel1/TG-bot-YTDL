@@ -3,6 +3,8 @@ from pathlib import Path
 from user_settings import (
     get_search_mode,
     set_search_mode,
+    remember_chat,
+    list_known_chat_ids,
     add_channel_sub,
     list_channel_subs,
     update_channel_sub,
@@ -88,3 +90,17 @@ def test_channel_watch_last_run_and_iter(tmp_path, monkeypatch):
         ('1', 'A'),
         ('2', 'B'),
     }
+
+
+def test_known_chats_and_list_includes_search_and_subs(tmp_path, monkeypatch):
+    monkeypatch.setattr(user_settings, 'DATA_DIR', tmp_path)
+    monkeypatch.setattr(user_settings, 'SEARCH_MODES_FILE', tmp_path / 'search_modes.json')
+    monkeypatch.setattr(user_settings, 'CHANNEL_SUBS_FILE', tmp_path / 'channel_subscriptions.json')
+    monkeypatch.setattr(user_settings, 'KNOWN_CHATS_FILE', tmp_path / 'known_chats.json')
+
+    remember_chat(111)
+    remember_chat(111)
+    set_search_mode(222, True)
+    add_channel_sub(333, _sample_sub('C', 'UCc'))
+
+    assert set(list_known_chat_ids()) == {'111', '222', '333'}

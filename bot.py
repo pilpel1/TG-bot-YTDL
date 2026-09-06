@@ -6,6 +6,7 @@ from config import BOT_TOKEN, LOCAL_API_AVAILABLE, LOCAL_API_BASE_URL, LOCAL_API
 from bot_handlers import (
     start, ask_format, button_click, handle_thank_you, version, help_command, mode,
     stop_download, search_mode, channels_command, build_bot_commands,
+    refresh_all_user_command_menus,
 )
 from utils import cleanup_temp_files, check_ffmpeg_on_startup
 from download_queue import DownloadQueue
@@ -33,6 +34,7 @@ async def post_init(application):
     # ברירת מחדל גלובלית (כבוי). לכל משתמש מתעדכן תפריט פרטי
     # ב-/search_mode, /start ו-/help דרך BotCommandScopeChat.
     await application.bot.set_my_commands(build_bot_commands(search_mode_on=False))
+    await refresh_all_user_command_menus(application.bot)
     logger.info("Bot commands menu registered")
 
 async def post_stop(application):

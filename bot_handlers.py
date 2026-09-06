@@ -19,6 +19,8 @@ from download_queue import CancellationToken
 from user_settings import (
     get_search_mode,
     set_search_mode,
+    remember_chat,
+    list_known_chat_ids,
     list_channel_subs,
     get_channel_sub,
     add_channel_sub,
@@ -258,6 +260,7 @@ async def sync_user_command_menu(bot, chat_id, search_mode_on: bool):
     ככה סטטוס 'פעיל/כבוי' של משתמש א' לא מופיע אצל משתמש ב'.
     נקרא גם ב-/start ו-/help כדי לתקן תיאור ישן אחרי ריסטארט בוט
     (user_data בזיכרון מתאפס, אבל תפריט טלגרם נשאר עד שמעדכנים)."""
+    remember_chat(chat_id)
     try:
         await bot.set_my_commands(
             build_bot_commands(search_mode_on),
@@ -265,6 +268,31 @@ async def sync_user_command_menu(bot, chat_id, search_mode_on: bool):
         )
     except Exception as e:
         logger.warning(f"Could not sync command menu for chat {chat_id}: {e}")
+
+
+async def ensure_command_menu_synced(context, chat_id, user_id):
+    """מרענן תפריט פעם אחת בהרצה הזו — תופס משתמשים עם תפריט ישן בלי /channels."""
+    if context.user_data.get('commands_menu_synced'):
+        return
+    await sync_user_command_menu(
+        context.bot,
+        chat_id,
+        is_search_mode_enabled(context, user_id),
+    )
+    context.user_data['commands_menu_synced'] = True
+
+
+async def refresh_all_user_command_menus(bot):
+    """אחרי עליית הבוט: דוחף את רשימת הפקודות העדכנית לכל צ'אט מוכר."""
+    chat_ids = list_known_chat_ids()
+    for chat_id in chat_ids:
+        try:
+            numeric_id = int(chat_id)
+        except (TypeError, ValueError):
+            continue
+        await sync_user_command_menu(bot, numeric_id, get_search_mode(numeric_id))
+    if chat_ids:
+        logger.info(f"Refreshed command menus for {len(chat_ids)} chats")
 
 
 def build_unrecognized_input_message(search_mode_on: bool = False) -> str:
@@ -491,6 +519,9 @@ async def show_channel_edit(message, user_id, index):
 
 async def channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """רשימת ערוצים במעקב + הוספה/עריכה."""
+    await ensure_command_menu_synced(
+        context, update.effective_chat.id, update.effective_user.id
+    )
     clear_channel_wizard(context)
     await show_channels_list(update.message, update.effective_user.id)
 
@@ -878,6 +909,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat and update.effective_user:
+        await ensure_command_menu_synced(
+            context, update.effective_chat.id, update.effective_user.id
+        )
+
     # בדיקת סוג ההודעה וטיפול בהתאם
     message = update.message
     
