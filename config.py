@@ -136,9 +136,10 @@ CHANNEL_WATCH_MAX_PER_USER = _env_int('CHANNEL_WATCH_MAX_PER_USER', 10)
 CHANNEL_WATCH_NOTIFIED_CAP = _env_int('CHANNEL_WATCH_NOTIFIED_CAP', 200)
 
 # Version info
-VERSION = "0.11.0"
-CHANGELOG = """🆕 גרסה 0.11.0:
+VERSION = "0.11.1"
+CHANGELOG = """🆕 גרסה 0.11.1:
 📺 מעקב אחרי ערוצי יוטיוב
-• /channels — הוספה, עריכה והסרה של ערוצים
+• /channels בתפריט הפקודות (גם למשתמשים עם תפריט ישן)
+• הוספה, עריכה והסרה של ערוצים
 • בדיקה פנימית ב-08:00 ו-20:00 (ניתן לשינוי)
 • סרטון חדש מגיע עם קישור + אודיו/וידאו לפי מה שבחרת"""

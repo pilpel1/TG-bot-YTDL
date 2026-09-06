@@ -31,6 +31,11 @@ from utils import (
 )
 
 # Fixtures
+@pytest.fixture(autouse=True)
+def _dont_write_known_chats(monkeypatch):
+    monkeypatch.setattr('bot_handlers.remember_chat', lambda chat_id: None)
+
+
 @pytest.fixture
 def mock_update():
     update = MagicMock(spec=Update)

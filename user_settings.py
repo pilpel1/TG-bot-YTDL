@@ -10,12 +10,14 @@ from config import CHANNEL_WATCH_MAX_PER_USER, CHANNEL_WATCH_NOTIFIED_CAP
 DATA_DIR = Path('data')
 SEARCH_MODES_FILE = DATA_DIR / 'search_modes.json'
 CHANNEL_SUBS_FILE = DATA_DIR / 'channel_subscriptions.json'
+KNOWN_CHATS_FILE = DATA_DIR / 'known_chats.json'
 
 VALID_SOURCES = ('videos', 'shorts')
 VALID_DELIVERY = ('audio', 'video')
 
 _lock = threading.Lock()
 _subs_lock = threading.Lock()
+_chats_lock = threading.Lock()
 
 
 def _ensure_data_dir():
@@ -64,6 +66,52 @@ def set_search_mode(user_id, enabled: bool):
         except Exception as e:
             logger.error(f"Could not save search mode for user {user_id}: {e}")
             raise
+
+
+def _read_known_chats() -> list:
+    if not KNOWN_CHATS_FILE.exists():
+        return []
+    try:
+        with open(KNOWN_CHATS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return [str(item) for item in data]
+    except Exception as e:
+        logger.warning(f"Could not read known chats file: {e}")
+    return []
+
+
+def _write_known_chats(chats: list):
+    _ensure_data_dir()
+    tmp_path = KNOWN_CHATS_FILE.with_suffix('.tmp')
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(chats, f, ensure_ascii=False, indent=2)
+    tmp_path.replace(KNOWN_CHATS_FILE)
+
+
+def remember_chat(chat_id):
+    """שומר chat_id כדי שאפשר יהיה לרענן תפריט פקודות אחרי ריסטארט."""
+    with _chats_lock:
+        chats = _read_known_chats()
+        key = str(chat_id)
+        if key not in chats:
+            chats.append(key)
+            try:
+                _write_known_chats(chats)
+            except Exception as e:
+                logger.warning(f"Could not save known chat {chat_id}: {e}")
+
+
+def list_known_chat_ids():
+    """chat_ids שכבר דיברו עם הבוט (תפריט, חיפוש, או מעקב ערוצים)."""
+    ids = set()
+    with _chats_lock:
+        ids.update(_read_known_chats())
+    with _lock:
+        ids.update(_read_search_modes().keys())
+    with _subs_lock:
+        ids.update(_read_subs_store()['users'].keys())
+    return list(ids)
 
 
 def _empty_subs_store():
