@@ -80,6 +80,30 @@ class DownloadQueue:
             self._worker_task = asyncio.create_task(self._worker_loop())
             logger.info("Download queue worker started")
 
+    def is_idle(self) -> bool:
+        """True כשאין ג'וב רץ ואין ג'ובים ממתינים בתור."""
+        return not self._jobs
+
+    def job_count(self) -> int:
+        return len(self._jobs)
+
+    async def cancel_all(self, notify_text=None) -> int:
+        """מבטל את כל הג'ובים (רץ + ממתינים). מחזיר כמה בוטלו.
+
+        notify_text: אם סופק, מנסים לעדכן את הודעת הסטטוס של כל ג'וב.
+        קודם מבטלים את כולם בצורה סינכרונית, ורק אז await על ההודעות —
+        כדי שה-worker לא יספיק למשוך ג'וב ממתין בין ביטול לביטול."""
+        jobs = list(self._jobs.values())
+        for job in jobs:
+            self.cancel(job.job_id)
+        if notify_text:
+            for job in jobs:
+                try:
+                    await job.status_message.edit_text(notify_text)
+                except Exception as e:
+                    logger.warning(f"Could not notify cancelled job {job.job_id}: {e}")
+        return len(jobs)
+
     async def stop(self):
         """עוצר את ה-worker בצורה מסודרת - חובה לקרוא לפני שה-event loop
         נסגר (למשל ב-post_stop של python-telegram-bot). בלי זה הטאסק

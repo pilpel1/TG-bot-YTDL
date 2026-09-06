@@ -764,3 +764,54 @@ async def test_stop_download_cancels_all_own_jobs_when_multiple_queued(mock_upda
     await stop_download(mock_update, mock_context)
 
     mock_update.message.reply_text.assert_called_once_with('ביטלתי 3 הורדות (כל מה שהיה לך בתור) 🛑')
+
+@pytest.mark.asyncio
+async def test_ask_format_url_during_maintenance_does_not_start_download_flow(mock_update, mock_context):
+    mock_update.message.text = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    with patch('bot_handlers.is_maintenance_mode', return_value=True), \
+         patch('bot_handlers.start_youtube_download_options_prefetch') as mock_prefetch:
+        await ask_format(mock_update, mock_context)
+
+    mock_prefetch.assert_not_called()
+    mock_update.message.reply_text.assert_called_once_with(
+        'הבוט בעבודות תחזוקה עכשיו. נא לשלוח את הקישור שוב בעוד כמה דקות 🔄'
+    )
+
+
+@pytest.mark.asyncio
+async def test_button_click_cancel_still_works_during_maintenance(mock_update, mock_context):
+    mock_update.callback_query = AsyncMock()
+    mock_update.callback_query.data = 'cancel'
+    mock_update.callback_query.message = MagicMock()
+    mock_update.callback_query.message.edit_text = AsyncMock()
+    mock_context.user_data = {'current_url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'}
+
+    with patch('bot_handlers.is_maintenance_mode', return_value=True):
+        await button_click(mock_update, mock_context)
+
+    mock_update.callback_query.answer.assert_awaited()
+    mock_update.callback_query.message.edit_text.assert_awaited_with(
+        'בוטל. אפשר לשלוח קישור או חיפוש חדש.'
+    )
+    assert mock_context.user_data.get('current_url') is None
+
+
+@pytest.mark.asyncio
+async def test_button_click_quality_blocked_during_maintenance(mock_update, mock_context):
+    mock_update.callback_query = AsyncMock()
+    mock_update.callback_query.data = 'quality_0'
+    mock_update.callback_query.message = MagicMock()
+    mock_update.callback_query.message.edit_text = AsyncMock()
+    mock_context.user_data = {
+        'current_url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        'youtube_download_options': [build_youtube_quality_option(720)],
+    }
+
+    with patch('bot_handlers.is_maintenance_mode', return_value=True), \
+         patch('bot_handlers.enqueue_download_job', new=AsyncMock()) as mock_enqueue:
+        await button_click(mock_update, mock_context)
+
+    mock_enqueue.assert_not_called()
+    mock_update.callback_query.message.edit_text.assert_awaited_with(
+        'הבוט בעבודות תחזוקה עכשיו. נא לשלוח את הקישור שוב בעוד כמה דקות 🔄'
+    )

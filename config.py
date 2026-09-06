@@ -30,10 +30,12 @@ def is_local_api_available(timeout=5):
 # Paths
 DOWNLOADS_DIR = Path('downloads')
 LOGS_DIR = Path('logs')
+DATA_DIR = Path('data')
 
 # Create necessary directories
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
+DATA_DIR.mkdir(exist_ok=True)
 
 # Download settings - auto-detect based on real Local API availability
 LOCAL_API_AVAILABLE = is_local_api_available()
@@ -80,10 +82,33 @@ YOUTUBE_SEARCH_RESULTS_LIMIT = 5
 YOUTUBE_SEARCH_MIN_QUERY_LENGTH = 3
 YOUTUBE_SEARCH_MAX_QUERY_LENGTH = 100
 
+# עדכון yt-dlp אוטומטי (systemd). אפשר לדרוס ב-.env בלי לגעת בקוד.
+def _env_int(name, default):
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == '':
+        return default
+    return int(raw)
+
+
+def _env_float(name, default):
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == '':
+        return default
+    return float(raw)
+
+
+YTDLP_UPDATE_HOUR = _env_int('YTDLP_UPDATE_HOUR', 1)
+YTDLP_UPDATE_MAX_WAIT_HOURS = _env_float('YTDLP_UPDATE_MAX_WAIT_HOURS', 4)
+YTDLP_UPDATE_TIMEZONE = os.getenv('YTDLP_UPDATE_TIMEZONE', 'Asia/Jerusalem') or 'Asia/Jerusalem'
+YTDLP_PENDING_UPDATE_FLAG = DATA_DIR / 'pending_ytdlp_update'
+MAINTENANCE_USER_MESSAGE = (
+    'הבוט בעבודות תחזוקה עכשיו. נא לשלוח את הקישור שוב בעוד כמה דקות 🔄'
+)
+
 # Version info
-VERSION = "0.9.0"
-CHANGELOG = """🆕 גרסה 0.9.0:
-🔍 מצב חיפוש חדש ביוטיוב
-• /search_mode מפעיל או מכבה חיפוש לפי טקסט (שם שיר/אמן)
-• הפקודות זמינות מתפריט / בטלגרם
-• /help — עזרה ופירוט פקודות"""
+VERSION = "0.10.0"
+CHANGELOG = """🆕 גרסה 0.10.0:
+⚙️ הבוט כשירות + עדכון yt-dlp אוטומטי
+• בדיקה כל לילה; התקנה רק כשהבוט כבוי
+• מצב תחזוקה בזמן ריקון התור
+• Local API רץ כשירות נפרד (מצב 2GB קבוע)"""

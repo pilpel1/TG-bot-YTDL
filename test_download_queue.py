@@ -391,3 +391,61 @@ async def test_stop_cancels_worker_task_cleanly(queue):
 async def test_stop_is_safe_when_worker_never_started():
     never_started_queue = DownloadQueue()
     await never_started_queue.stop()  # לא אמור לזרוק שום דבר
+
+
+def test_is_idle_when_no_jobs_were_enqueued():
+    download_queue = DownloadQueue()
+    assert download_queue.is_idle()
+    assert download_queue.job_count() == 0
+
+
+@pytest.mark.asyncio
+async def test_is_idle_false_while_job_running(queue):
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def job():
+        started.set()
+        await release.wait()
+
+    await queue.enqueue(chat_id=1, status_message=make_status_message(), coro_factory=job)
+    await asyncio.wait_for(started.wait(), timeout=1)
+    assert not queue.is_idle()
+    assert queue.job_count() == 1
+
+    release.set()
+    for _ in range(50):
+        if queue.is_idle():
+            break
+        await asyncio.sleep(0.02)
+    assert queue.is_idle()
+
+
+@pytest.mark.asyncio
+async def test_cancel_all_cancels_running_and_waiting_jobs(queue):
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+
+    async def first_job():
+        first_started.set()
+        await release_first.wait()
+
+    second_ran = asyncio.Event()
+
+    async def second_job():
+        second_ran.set()
+
+    status_1 = make_status_message(chat_id=1)
+    status_2 = make_status_message(chat_id=2)
+    await queue.enqueue(chat_id=1, status_message=status_1, coro_factory=first_job)
+    await asyncio.wait_for(first_started.wait(), timeout=1)
+    await queue.enqueue(chat_id=2, status_message=status_2, coro_factory=second_job)
+
+    cancelled = await queue.cancel_all('תחזוקה')
+    assert cancelled == 2
+    status_1.edit_text.assert_called_with('תחזוקה')
+    status_2.edit_text.assert_called_with('תחזוקה')
+
+    release_first.set()
+    await asyncio.sleep(0.05)
+    assert not second_ran.is_set()

@@ -3,11 +3,18 @@ from datetime import datetime
 import os
 from config import LOGS_DIR
 
-# Configure logging
+# Configure logging (stdout for systemd/journalctl + file for the logs/ folder)
+_LOG_FORMAT = '%(asctime)s - %(levelname)s - %(message)s'
 logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format=_LOG_FORMAT,
     level=logging.INFO
 )
+
+_root_logger = logging.getLogger()
+if not any(isinstance(handler, logging.FileHandler) for handler in _root_logger.handlers):
+    _file_handler = logging.FileHandler(LOGS_DIR / 'bot.log', encoding='utf-8')
+    _file_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+    _root_logger.addHandler(_file_handler)
 
 # Disable httpx logging
 logging.getLogger('httpx').setLevel(logging.WARNING)

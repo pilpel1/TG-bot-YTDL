@@ -1,0 +1,29 @@
+# Template — do not copy this file as-is.
+# Install with: sudo bash scripts/linux/install_systemd.sh
+#
+# __PROJECT_DIR__, __SERVICE_USER__ and __SERVICE_GROUP__ are replaced
+# with values detected on that machine.
+#
+# Restart=always: a clean exit after requesting a yt-dlp update comes back up.
+# systemctl stop does NOT auto-restart (that's an explicit stop).
+# RestartSec=10: pause between crash-loop retries.
+
+[Unit]
+Description=TG YouTube download Telegram bot
+After=network-online.target docker.service telegram-bot-api.service
+Wants=network-online.target telegram-bot-api.service
+
+[Service]
+Type=simple
+User=__SERVICE_USER__
+Group=__SERVICE_GROUP__
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=/bin/bash __PROJECT_DIR__/scripts/linux/run_bot_service.sh
+Restart=always
+RestartSec=10
+TimeoutStopSec=120
+StartLimitBurst=5
+StartLimitIntervalSec=120
+
+[Install]
+WantedBy=multi-user.target

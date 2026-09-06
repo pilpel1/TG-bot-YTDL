@@ -1,0 +1,23 @@
+# Template — do not copy this file as-is.
+# Install with: sudo bash scripts/linux/install_systemd.sh
+#
+# __PROJECT_DIR__ is replaced with the real repo path on that machine.
+
+[Unit]
+Description=Telegram Local Bot API Server (2GB uploads)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=/bin/bash __PROJECT_DIR__/scripts/linux/run_local_api_service.sh
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+StartLimitBurst=5
+StartLimitIntervalSec=120
+
+[Install]
+WantedBy=multi-user.target
