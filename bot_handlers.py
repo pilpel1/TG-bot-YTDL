@@ -12,11 +12,32 @@ from config import (
     YOUTUBE_SEARCH_MIN_QUERY_LENGTH,
     YOUTUBE_SEARCH_MAX_QUERY_LENGTH,
     MAINTENANCE_USER_MESSAGE,
+    CHANNEL_WATCH_MAX_PER_USER,
 )
 from download_manager import download_with_quality, download_playlist
 from download_queue import CancellationToken
-from user_settings import get_search_mode, set_search_mode
+from user_settings import (
+    get_search_mode,
+    set_search_mode,
+    list_channel_subs,
+    get_channel_sub,
+    add_channel_sub,
+    update_channel_sub,
+    remove_channel_sub,
+    find_duplicate_channel,
+    normalize_source_list,
+    normalize_delivery_list,
+)
 from ytdlp_updater import is_maintenance_mode, track_ytdlp_metadata
+from channel_watch import (
+    resolve_channel,
+    fetch_source_entries,
+    initialize_baselines,
+    is_youtube_url,
+    sources_label_he,
+    delivery_label_he,
+    description_label_he,
+)
 from utils import (
     fetch_youtube_download_options,
     build_youtube_audio_option,
@@ -150,6 +171,10 @@ def clear_download_state(context):
     ]:
         context.user_data.pop(key, None)
 
+
+def clear_channel_wizard(context):
+    context.user_data.pop('channel_wizard', None)
+
 def is_valid_url(url: str) -> bool:
     """בודק האם המחרוזת היא URL תקין"""
     url_pattern = re.compile(
@@ -221,6 +246,7 @@ def build_bot_commands(search_mode_on: bool = False):
         BotCommand('start', 'הודעת פתיחה'),
         BotCommand('help', 'עזרה, פקודות ומגבלת קבצים'),
         BotCommand('search_mode', search_desc),
+        BotCommand('channels', 'מעקב אחרי ערוצי יוטיוב'),
         BotCommand('stop', 'ביטול הורדה פעילה או ממתינה'),
         BotCommand('version', 'גרסה נוכחית ושינויים'),
     ]
@@ -325,6 +351,445 @@ async def search_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+def _checked(label, selected):
+    return f'✓ {label}' if selected else label
+
+
+def build_channels_list_keyboard(subs):
+    keyboard = [
+        [InlineKeyboardButton(sub.get('channel_label') or f'ערוץ {index + 1}', callback_data=f'ch_e:{index}')]
+        for index, sub in enumerate(subs)
+    ]
+    if len(subs) < CHANNEL_WATCH_MAX_PER_USER:
+        keyboard.append([InlineKeyboardButton('➕ הוסף ערוץ', callback_data='ch_add')])
+    return InlineKeyboardMarkup(keyboard) if keyboard else InlineKeyboardMarkup([
+        [InlineKeyboardButton('➕ הוסף ערוץ', callback_data='ch_add')]
+    ])
+
+
+def build_channels_list_text(subs):
+    count = len(subs)
+    header = (
+        f'מעקב אחרי ערוצי יוטיוב ({count}/{CHANNEL_WATCH_MAX_PER_USER})\n'
+        'כשערוץ מעלה סרטון חדש — תקבל אותו כאן.'
+    )
+    if not subs:
+        return header + '\n\nאין ערוצים במעקב עדיין.'
+    lines = [header, '']
+    for sub in subs:
+        lines.append(
+            f"• {sub.get('channel_label') or 'ערוץ'} — "
+            f"{sources_label_he(sub.get('sources'))} · "
+            f"{delivery_label_he(sub.get('delivery'))} · "
+            f"{description_label_he(sub.get('include_description'))}"
+        )
+    lines.append('\nלחץ על ערוץ כדי לערוך.')
+    return '\n'.join(lines)
+
+
+def build_channel_edit_text(sub):
+    label = sub.get('channel_label') or 'ערוץ'
+    url = sub.get('channel_url') or ''
+    return (
+        f'{label}\n{url}\n\n'
+        f'מה לעקוב: {sources_label_he(sub.get("sources"))}\n'
+        f'מה לשלוח: {delivery_label_he(sub.get("delivery"))}\n'
+        f'תיאור: {description_label_he(sub.get("include_description"))}\n\n'
+        'לחץ על כפתור כדי לשנות. מה שלא נוגעים בו נשאר כמו שהוא.'
+    )
+
+
+def build_channel_edit_keyboard(sub, index):
+    sources = sub.get('sources') or []
+    delivery = sub.get('delivery') or []
+    include_description = bool(sub.get('include_description'))
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(_checked('סרטונים', 'videos' in sources), callback_data=f'ch_tv:{index}'),
+            InlineKeyboardButton(_checked('שורטס', 'shorts' in sources), callback_data=f'ch_ts:{index}'),
+        ],
+        [
+            InlineKeyboardButton(_checked('אודיו', 'audio' in delivery), callback_data=f'ch_ta:{index}'),
+            InlineKeyboardButton(_checked('וידאו', 'video' in delivery), callback_data=f'ch_td:{index}'),
+        ],
+        [
+            InlineKeyboardButton(
+                _checked('עם תיאור', include_description),
+                callback_data=f'ch_tc:{index}',
+            ),
+        ],
+        [InlineKeyboardButton('🗑 הסר מעקב', callback_data=f'ch_rm:{index}')],
+        [InlineKeyboardButton('« חזרה', callback_data='ch_list')],
+    ])
+
+
+def build_wizard_sources_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton('סרטונים', callback_data='ch_src:videos')],
+        [InlineKeyboardButton('שורטס', callback_data='ch_src:shorts')],
+        [InlineKeyboardButton('שניהם', callback_data='ch_src:both')],
+        [InlineKeyboardButton('❌ ביטול', callback_data='ch_cancel')],
+    ])
+
+
+def build_wizard_delivery_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton('אודיו 🎵', callback_data='ch_dlv:audio')],
+        [InlineKeyboardButton('וידאו 🎥', callback_data='ch_dlv:video')],
+        [InlineKeyboardButton('שניהם', callback_data='ch_dlv:both')],
+        [InlineKeyboardButton('❌ ביטול', callback_data='ch_cancel')],
+    ])
+
+
+def build_wizard_description_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton('עם תיאור', callback_data='ch_dsc:1')],
+        [InlineKeyboardButton('בלי תיאור', callback_data='ch_dsc:0')],
+        [InlineKeyboardButton('❌ ביטול', callback_data='ch_cancel')],
+    ])
+
+
+def build_wizard_confirm_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton('אישור ✅', callback_data='ch_ok')],
+        [InlineKeyboardButton('❌ ביטול', callback_data='ch_cancel')],
+    ])
+
+
+def build_wizard_confirm_text(wizard):
+    return (
+        f"לאשר מעקב אחרי {wizard.get('channel_label') or 'הערוץ'}?\n"
+        f"{wizard.get('channel_url') or ''}\n\n"
+        f"מה לעקוב: {sources_label_he(wizard.get('sources'))}\n"
+        f"מה לשלוח: {delivery_label_he(wizard.get('delivery'))}\n"
+        f"תיאור: {description_label_he(wizard.get('include_description'))}\n\n"
+        'סרטונים שכבר עלו לא יישלחו — רק מה שיעלה מעכשיו.'
+    )
+
+
+async def show_channels_list(message, user_id, *, edit_existing=False):
+    subs = list_channel_subs(user_id)
+    text = build_channels_list_text(subs)
+    markup = build_channels_list_keyboard(subs)
+    if edit_existing:
+        await message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+        return
+    await message.reply_text(text, reply_markup=markup, disable_web_page_preview=True)
+
+
+async def show_channel_edit(message, user_id, index):
+    sub = get_channel_sub(user_id, index)
+    if not sub:
+        await message.edit_text('הערוץ כבר לא במעקב.')
+        return
+    await message.edit_text(
+        build_channel_edit_text(sub),
+        reply_markup=build_channel_edit_keyboard(sub, index),
+        disable_web_page_preview=True,
+    )
+
+
+async def channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """רשימת ערוצים במעקב + הוספה/עריכה."""
+    clear_channel_wizard(context)
+    await show_channels_list(update.message, update.effective_user.id)
+
+
+async def start_channel_add(message, context, user_id):
+    if len(list_channel_subs(user_id)) >= CHANNEL_WATCH_MAX_PER_USER:
+        await message.edit_text(
+            f'הגעת למקסימום {CHANNEL_WATCH_MAX_PER_USER} ערוצים.\n'
+            'אפשר להסיר ערוץ קיים כדי לפנות מקום.'
+        )
+        return
+    context.user_data['channel_wizard'] = {'step': 'awaiting_url'}
+    await message.edit_text(
+        'שלח קישור לערוץ יוטיוב (למשל youtube.com/@name או /channel/UC...).\n'
+        'אפשר גם קישור לסרטון מהערוץ.\n\n'
+        'לביטול: /channels'
+    )
+
+
+async def handle_channel_wizard_url(update, context, text):
+    message = update.message
+    words = text.split() if text else []
+    urls = [word for word in words if is_valid_url(word)]
+    if not urls:
+        await message.reply_text(
+            'לא מצאתי קישור. שלח קישור לערוץ יוטיוב, או /channels לביטול.'
+        )
+        return
+    url = urls[0]
+    if not is_youtube_url(url):
+        await message.reply_text('זה לא קישור יוטיוב. שלח קישור לערוץ, או /channels לביטול.')
+        return
+    if is_maintenance_mode():
+        await reply_maintenance(update=update, message=message)
+        return
+
+    status = await message.reply_text('בודק את הערוץ... ⏳')
+    try:
+        with track_ytdlp_metadata():
+            resolved = await asyncio.to_thread(resolve_channel, url)
+    except Exception as e:
+        logger.warning(f"Could not resolve channel from {url}: {e}")
+        await status.edit_text('לא הצלחתי לזהות את הערוץ. נסה קישור אחר, או /channels לביטול.')
+        return
+
+    user_id = update.effective_user.id
+    duplicate = find_duplicate_channel(
+        user_id,
+        channel_id=resolved.get('channel_id'),
+        channel_url=resolved.get('channel_url'),
+    )
+    if duplicate is not None:
+        clear_channel_wizard(context)
+        await status.edit_text(
+            f"{resolved.get('channel_label')} כבר במעקב.\nאפשר לערוך אותו מהרשימה.",
+            reply_markup=build_channels_list_keyboard(list_channel_subs(user_id)),
+        )
+        return
+    if len(list_channel_subs(user_id)) >= CHANNEL_WATCH_MAX_PER_USER:
+        clear_channel_wizard(context)
+        await status.edit_text(f'הגעת למקסימום {CHANNEL_WATCH_MAX_PER_USER} ערוצים.')
+        return
+
+    wizard = context.user_data.get('channel_wizard') or {}
+    wizard.update({
+        'step': 'sources',
+        'channel_url': resolved['channel_url'],
+        'channel_id': resolved.get('channel_id') or '',
+        'channel_label': resolved['channel_label'],
+    })
+    context.user_data['channel_wizard'] = wizard
+    await status.edit_text(
+        f"מצאתי: {resolved['channel_label']}\nמה לעקוב?",
+        reply_markup=build_wizard_sources_keyboard(),
+        disable_web_page_preview=True,
+    )
+
+
+async def finalize_channel_add(message, context, user_id):
+    wizard = context.user_data.get('channel_wizard') or {}
+    if not wizard.get('channel_url'):
+        clear_channel_wizard(context)
+        await message.edit_text('משהו השתבש. נסה שוב עם /channels.')
+        return
+
+    if is_maintenance_mode():
+        await message.edit_text(MAINTENANCE_USER_MESSAGE)
+        return
+
+    await message.edit_text('שומר ומתעלם מסרטונים שכבר עלו... ⏳')
+    source_entries = {}
+    for source_key in wizard.get('sources') or ['videos']:
+        try:
+            with track_ytdlp_metadata():
+                source_entries[source_key] = await asyncio.to_thread(
+                    fetch_source_entries,
+                    wizard['channel_url'],
+                    source_key,
+                )
+        except Exception as e:
+            logger.warning(f"Baseline fetch failed for {wizard.get('channel_label')} /{source_key}: {e}")
+            source_entries[source_key] = []
+
+    sub = initialize_baselines({
+        'channel_url': wizard['channel_url'],
+        'channel_id': wizard.get('channel_id') or '',
+        'channel_label': wizard.get('channel_label') or wizard['channel_url'],
+        'sources': wizard.get('sources') or ['videos'],
+        'delivery': wizard.get('delivery') or ['audio'],
+        'include_description': bool(wizard.get('include_description')),
+        'notified_video_ids': [],
+        'sources_state': {},
+    }, source_entries)
+
+    _index, error = add_channel_sub(user_id, sub)
+    clear_channel_wizard(context)
+    if error == 'limit':
+        await message.edit_text(f'הגעת למקסימום {CHANNEL_WATCH_MAX_PER_USER} ערוצים.')
+        return
+    if error == 'duplicate':
+        await message.edit_text('הערוץ כבר במעקב.')
+        return
+    await message.edit_text(
+        f"מעכשיו אעקוב אחרי {sub['channel_label']}.\n"
+        'סרטונים חדשים יגיעו לכאן (רק מה שיעלה מעכשיו).',
+        disable_web_page_preview=True,
+    )
+    await show_channels_list(message, user_id)
+
+
+def _parse_channel_index(data, prefix):
+    try:
+        return int(data[len(prefix):])
+    except ValueError:
+        return None
+
+
+async def handle_channel_callback(query, context):
+    data = query.data
+    user_id = query.from_user.id
+    message = query.message
+
+    if data == 'ch_list':
+        clear_channel_wizard(context)
+        await query.answer()
+        await show_channels_list(message, user_id, edit_existing=True)
+        return
+
+    if data == 'ch_cancel':
+        clear_channel_wizard(context)
+        await query.answer('בוטל')
+        await show_channels_list(message, user_id, edit_existing=True)
+        return
+
+    if data == 'ch_add':
+        await query.answer()
+        await start_channel_add(message, context, user_id)
+        return
+
+    if data.startswith('ch_src:'):
+        wizard = context.user_data.get('channel_wizard')
+        if not wizard:
+            await query.answer('הבחירה פגה. /channels')
+            return
+        choice = data.split(':', 1)[1]
+        wizard['sources'] = ['videos', 'shorts'] if choice == 'both' else [choice]
+        wizard['step'] = 'delivery'
+        context.user_data['channel_wizard'] = wizard
+        await query.answer()
+        await message.edit_text(
+            f"{wizard.get('channel_label')}\nמה לשלוח כשיש סרטון חדש?",
+            reply_markup=build_wizard_delivery_keyboard(),
+        )
+        return
+
+    if data.startswith('ch_dlv:'):
+        wizard = context.user_data.get('channel_wizard')
+        if not wizard:
+            await query.answer('הבחירה פגה. /channels')
+            return
+        choice = data.split(':', 1)[1]
+        wizard['delivery'] = ['audio', 'video'] if choice == 'both' else [choice]
+        wizard['step'] = 'description'
+        context.user_data['channel_wizard'] = wizard
+        await query.answer()
+        await message.edit_text(
+            f"{wizard.get('channel_label')}\nלצרף את תיאור הסרטון מהיוטיוב?",
+            reply_markup=build_wizard_description_keyboard(),
+        )
+        return
+
+    if data.startswith('ch_dsc:'):
+        wizard = context.user_data.get('channel_wizard')
+        if not wizard:
+            await query.answer('הבחירה פגה. /channels')
+            return
+        wizard['include_description'] = data.endswith(':1')
+        wizard['step'] = 'confirm'
+        context.user_data['channel_wizard'] = wizard
+        await query.answer()
+        await message.edit_text(
+            build_wizard_confirm_text(wizard),
+            reply_markup=build_wizard_confirm_keyboard(),
+            disable_web_page_preview=True,
+        )
+        return
+
+    if data == 'ch_ok':
+        wizard = context.user_data.get('channel_wizard')
+        if not wizard:
+            await query.answer('הבחירה פגה. /channels')
+            return
+        await query.answer()
+        await finalize_channel_add(message, context, user_id)
+        return
+
+    if data.startswith('ch_e:'):
+        index = _parse_channel_index(data, 'ch_e:')
+        if index is None:
+            await query.answer('בחירה לא תקפה')
+            return
+        await query.answer()
+        await show_channel_edit(message, user_id, index)
+        return
+
+    if data.startswith('ch_rmok:'):
+        index = _parse_channel_index(data, 'ch_rmok:')
+        if index is None:
+            await query.answer('בחירה לא תקפה')
+            return
+        if not remove_channel_sub(user_id, index):
+            await query.answer('הערוץ כבר לא במעקב')
+            await show_channels_list(message, user_id, edit_existing=True)
+            return
+        await query.answer('הוסר')
+        await show_channels_list(message, user_id, edit_existing=True)
+        return
+
+    if data.startswith('ch_rm:'):
+        index = _parse_channel_index(data, 'ch_rm:')
+        sub = get_channel_sub(user_id, index) if index is not None else None
+        if sub is None:
+            await query.answer('הערוץ כבר לא במעקב')
+            await show_channels_list(message, user_id, edit_existing=True)
+            return
+        await query.answer()
+        await message.edit_text(
+            f"להסיר מעקב אחרי {sub.get('channel_label') or 'הערוץ'}?",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton('כן, להסיר', callback_data=f'ch_rmok:{index}')],
+                [InlineKeyboardButton('לא', callback_data=f'ch_e:{index}')],
+            ]),
+        )
+        return
+
+    toggle_map = {
+        'ch_tv:': ('sources', 'videos'),
+        'ch_ts:': ('sources', 'shorts'),
+        'ch_ta:': ('delivery', 'audio'),
+        'ch_td:': ('delivery', 'video'),
+    }
+    for prefix, (field, value) in toggle_map.items():
+        if data.startswith(prefix):
+            index = _parse_channel_index(data, prefix)
+            sub = get_channel_sub(user_id, index) if index is not None else None
+            if sub is None:
+                await query.answer('הערוץ כבר לא במעקב')
+                return
+            current = list(sub.get(field) or [])
+            if value in current:
+                if len(current) == 1:
+                    await query.answer('חייבים לפחות אפשרות אחת', show_alert=True)
+                    return
+                current.remove(value)
+            else:
+                current.append(value)
+            if field == 'sources':
+                current = normalize_source_list(current)
+            else:
+                current = normalize_delivery_list(current)
+            update_channel_sub(user_id, index, **{field: current})
+            await query.answer('עודכן')
+            await show_channel_edit(message, user_id, index)
+            return
+
+    if data.startswith('ch_tc:'):
+        index = _parse_channel_index(data, 'ch_tc:')
+        sub = get_channel_sub(user_id, index) if index is not None else None
+        if sub is None:
+            await query.answer('הערוץ כבר לא במעקב')
+            return
+        update_channel_sub(user_id, index, include_description=not sub.get('include_description'))
+        await query.answer('עודכן')
+        await show_channel_edit(message, user_id, index)
+        return
+
+    await query.answer('בחירה לא תקפה')
+
+
 async def begin_youtube_download_flow(message, context, url, *, edit_existing=False):
     """מתחיל את זרימת הבחירה (אודיו/וידאו) לקישור יוטיוב."""
     context.user_data['current_url'] = url
@@ -370,6 +835,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'שלום! 👋\n'
         f'{SUPPORTED_SITES_MESSAGE}\n'
         'שלח קישור להורדה, או /search_mode לחיפוש ביוטיוב לפי טקסט.\n'
+        'מעקב אחרי ערוץ יוטיוב: /channels\n'
         'עזרה מלאה ופקודות: /help'
     )
 
@@ -398,12 +864,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'איך משתמשים:\n'
         '• שלח קישור — אשאל אודיו/וידאו (וביוטיוב גם איכות)\n'
         '• חיפוש לפי שם שיר/אמן — הפעל /search_mode ואז שלח טקסט\n'
+        '• מעקב ערוץ יוטיוב — /channels (סרטון חדש מגיע לכאן)\n'
         '• אם יש קישור בהודעה, אתייחס רק אליו\n\n'
         'פקודות:\n'
         '/start — הודעת פתיחה\n'
         '/help — העזרה הזאת\n'
         '/search_mode — הפעלה/כיבוי חיפוש טקסט (כרגע: '
         f'{search_status})\n'
+        '/channels — מעקב אחרי ערוצי יוטיוב\n'
         '/stop — ביטול הורדה פעילה או ממתינה בתור\n'
         '/version — גרסה נוכחית ושינויים\n\n'
         f'{build_file_limit_summary()}'
@@ -432,6 +900,11 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     words = text.split() if text else []
     valid_urls = [word for word in words if is_valid_url(word)]
     search_mode_on = is_search_mode_enabled(context, update.effective_user.id)
+
+    wizard = context.user_data.get('channel_wizard')
+    if wizard and wizard.get('step') == 'awaiting_url':
+        await handle_channel_wizard_url(update, context, text)
+        return
 
     # קישור תמיד מנצח — גם אם יש מסביב טקסט ארוך / "תודה" / מצב חיפוש דלוק
     if valid_urls:
@@ -760,6 +1233,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clear_download_state(context)
         await query.answer('בוטל')
         await query.message.edit_text('בוטל. אפשר לשלוח קישור או חיפוש חדש.')
+        return
+
+    if query.data.startswith('ch_'):
+        await handle_channel_callback(query, context)
         return
 
     if is_maintenance_mode():

@@ -295,8 +295,12 @@ async def download_playlist(context, status_message, url, download_mode, quality
         await safe_edit_message(status_message, 'משהו השתבש בהורדת הפלייליסט 😕')
 
 async def download_with_quality(context, status_message, url, download_mode, quality, quality_levels,
-                                 is_playlist=False, playlist_limit=None, should_cancel=None):
-    """הורדת קובץ באיכות ספציפית"""
+                                 is_playlist=False, playlist_limit=None, should_cancel=None,
+                                 quiet_complete=False):
+    """הורדת קובץ באיכות ספציפית.
+
+    quiet_complete: בלי הודעת "הנה הקובץ שלך" (מעקב ערוצים כבר שלח כותרת).
+    """
     current_file = None
     thumbnail_file = None
 
@@ -813,11 +817,12 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     )
                     
                     if not is_playlist:
-                        quality_msg = f" ({quality['quality_name']})" if quality['quality_name'] != 'איכות רגילה' else ""
-                        await status_message.get_bot().send_message(
-                            chat_id=status_message.chat_id,
-                            text=f'הנה הקובץ שלך!{quality_msg} 🎉'
-                        )
+                        if not quiet_complete:
+                            quality_msg = f" ({quality['quality_name']})" if quality['quality_name'] != 'איכות רגילה' else ""
+                            await status_message.get_bot().send_message(
+                                chat_id=status_message.chat_id,
+                                text=f'הנה הקובץ שלך!{quality_msg} 🎉'
+                            )
                         await safe_delete_message(status_message)
                         context.user_data.pop('current_quality_index', None)
                     
