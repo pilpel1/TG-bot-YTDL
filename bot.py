@@ -9,6 +9,7 @@ from bot_handlers import (
 )
 from utils import cleanup_temp_files, check_ffmpeg_on_startup
 from download_queue import DownloadQueue
+from ytdlp_updater import YtdlpUpdateManager
 
 
 async def post_init(application):
@@ -20,6 +21,10 @@ async def post_init(application):
     application.bot_data['download_queue'] = download_queue
     logger.info("Download queue initialized")
 
+    ytdlp_updater = YtdlpUpdateManager(application)
+    ytdlp_updater.start()
+    application.bot_data['ytdlp_updater'] = ytdlp_updater
+
     # ברירת מחדל גלובלית (כבוי). לכל משתמש מתעדכן תפריט פרטי
     # ב-/search_mode, /start ו-/help דרך BotCommandScopeChat.
     await application.bot.set_my_commands(build_bot_commands(search_mode_on=False))
@@ -30,6 +35,11 @@ async def post_stop(application):
     הנכונה לעצור טאסקים ברקע שהתחלנו ב-post_init. בלי זה, worker התור
     נשאר "תלוי" כש-run_polling סוגר את ה-loop בסגירה עם Ctrl+C, וגורם
     ל-'Task was destroyed but it is pending!' בלוגים."""
+    ytdlp_updater = application.bot_data.get('ytdlp_updater')
+    if ytdlp_updater:
+        await ytdlp_updater.stop()
+        logger.info("yt-dlp updater stopped")
+
     download_queue = application.bot_data.get('download_queue')
     if download_queue:
         await download_queue.stop()
@@ -113,7 +123,11 @@ def main():
         
         # Start the bot
         logger.info("Starting bot...")
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        # False במפורש: הודעות שנשלחו בזמן שהתהליך היה כבוי לא נזרקות.
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=False,
+        )
         
     except Exception as e:
         logger.error(f"Error starting bot: {str(e)}")

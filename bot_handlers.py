@@ -11,10 +11,12 @@ from config import (
     YOUTUBE_SEARCH_RESULTS_LIMIT,
     YOUTUBE_SEARCH_MIN_QUERY_LENGTH,
     YOUTUBE_SEARCH_MAX_QUERY_LENGTH,
+    MAINTENANCE_USER_MESSAGE,
 )
 from download_manager import download_with_quality, download_playlist
 from download_queue import CancellationToken
 from user_settings import get_search_mode, set_search_mode
+from ytdlp_updater import is_maintenance_mode, track_ytdlp_metadata
 from utils import (
     fetch_youtube_download_options,
     build_youtube_audio_option,
@@ -54,6 +56,32 @@ VERSIONS_URL = "https://github.com/pilpel1/TG-bot-YTDL/blob/main/VERSIONS.md"
 PLAYLIST_METADATA_ENTRIES_CAP = 20
 
 
+async def reply_maintenance(update=None, query=None, message=None):
+    """מודיע למשתמש שהבוט בתחזוקה. לא מתחיל עבודת yt-dlp חדשה."""
+    if query is not None:
+        try:
+            await query.answer()
+        except Exception:
+            pass
+        target = query.message
+        if target:
+            try:
+                await target.edit_text(MAINTENANCE_USER_MESSAGE)
+                return
+            except Exception:
+                pass
+            try:
+                await target.reply_text(MAINTENANCE_USER_MESSAGE)
+                return
+            except Exception:
+                pass
+    if message is not None:
+        await message.reply_text(MAINTENANCE_USER_MESSAGE)
+        return
+    if update is not None and update.effective_message:
+        await update.effective_message.reply_text(MAINTENANCE_USER_MESSAGE)
+
+
 async def enqueue_download_job(context, status_message, coro_factory, weight=1, cancel_token=None):
     """מכניס ג'וב הורדה לתור הגלובלי ומחזיר מיד - לא מחכה לסיום ההורדה.
     כך ה-handler משתחרר ומאפשר לבוט להמשיך להגיב למשתמשים אחרים בזמן
@@ -64,6 +92,14 @@ async def enqueue_download_job(context, status_message, coro_factory, weight=1, 
 
     cancel_token: אותו טוקן שכבר נסגר (closure) לתוך coro_factory כ-
     should_cancel - מועבר גם לתור כדי ש-/stop יוכל לסמן אותו דרך cancel()."""
+    if is_maintenance_mode():
+        logger.info("Skipped enqueue: maintenance mode is active")
+        try:
+            await status_message.edit_text(MAINTENANCE_USER_MESSAGE)
+        except Exception:
+            pass
+        return None
+
     download_queue = context.bot_data['download_queue']
     return await download_queue.enqueue(
         chat_id=status_message.chat_id,
@@ -237,11 +273,12 @@ async def handle_youtube_text_search(message, context, query):
     """מחפש ביוטיוב ומציג תוצאות (כולל כפתור ביטול)."""
     status_message = await message.reply_text('מחפש ביוטיוב... 🔍', quote=True)
     try:
-        results = await asyncio.to_thread(
-            search_youtube,
-            query,
-            YOUTUBE_SEARCH_RESULTS_LIMIT,
-        )
+        with track_ytdlp_metadata():
+            results = await asyncio.to_thread(
+                search_youtube,
+                query,
+                YOUTUBE_SEARCH_RESULTS_LIMIT,
+            )
     except Exception as e:
         logger.error(f"YouTube search failed for query '{query}': {e}")
         await status_message.edit_text('החיפוש נכשל, נסה שוב 😕')
@@ -398,6 +435,10 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # קישור תמיד מנצח — גם אם יש מסביב טקסט ארוך / "תודה" / מצב חיפוש דלוק
     if valid_urls:
+        if is_maintenance_mode():
+            await reply_maintenance(update=update, message=message)
+            return
+
         url = valid_urls[0]
         context.user_data.pop('youtube_search_results', None)
         context.user_data.pop('youtube_search_query', None)
@@ -427,6 +468,9 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # בלי קישור: מצב חיפוש → חיפוש (כולל "תודה עוזי חיטמן")
     if search_mode_on:
         if is_searchable_text(text):
+            if is_maintenance_mode():
+                await reply_maintenance(update=update, message=message)
+                return
             await handle_youtube_text_search(message, context, text.strip())
         else:
             await message.reply_text(build_unrecognized_input_message(search_mode_on=True))
@@ -541,6 +585,12 @@ def build_playlist_prompt(playlist_info, is_mix=False):
 
 
 async def prefetch_youtube_download_options(url):
+    """שולף ברקע metadata ואפשרויות הורדה ליוטיוב."""
+    with track_ytdlp_metadata():
+        return await _prefetch_youtube_download_options(url)
+
+
+async def _prefetch_youtube_download_options(url):
     """שולף ברקע metadata ואפשרויות הורדה ליוטיוב."""
     playlist_info = None
     is_mix = is_youtube_mix_url(url)
@@ -710,6 +760,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clear_download_state(context)
         await query.answer('בוטל')
         await query.message.edit_text('בוטל. אפשר לשלוח קישור או חיפוש חדש.')
+        return
+
+    if is_maintenance_mode():
+        await reply_maintenance(update=update, query=query)
         return
 
     if query.data.startswith('search_pick_'):

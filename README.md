@@ -198,9 +198,42 @@ scripts/linux/update_bot.sh
 # Windows (מעדכן גם Windows וגם WSL)
 scripts\windows\update_ytdlp.bat
 
-# Linux
+# Linux (ידני; בפרודקשן זה קורה אוטומטית בלילה)
 scripts/linux/update_ytdlp.sh
 ```
+
+## 🐧 הרצה כשירות בשרת Linux (פרודקשן)
+
+בפרודקשן הבוט אמור לרוץ בלי חלון טרמינל, עם Local API תמיד-חי (מצב 2GB) ועדכון `yt-dlp` אוטומטי בלילה.
+
+1. שכפל את הריפו לכל נתיב (עם `venv` ו-`.env`). הסקריפט מזהה את המיקום לבד.
+2. ודא ששעון השרת נכון, או הגדר ב-`.env` (אופציונלי):
+   ```
+   YTDLP_UPDATE_HOUR=1
+   YTDLP_UPDATE_MAX_WAIT_HOURS=4
+   YTDLP_UPDATE_TIMEZONE=Asia/Jerusalem
+   ```
+3. התקן את יחידות systemd (כותב נתיב+יוזר מקומיים ל-`/etc`, לא לגיט):
+
+```bash
+# מתוך תיקיית הפרויקט — בלי להדליק עדיין, אם הבוט הישן עדיין רץ
+sudo bash scripts/linux/install_systemd.sh
+
+# אחרי שעוצרים את התהליך הישן:
+sudo systemctl enable --now telegram-bot-api.service
+sudo systemctl enable --now tg-bot-ytdl.service
+```
+
+פקודות שימושיות:
+
+```bash
+sudo systemctl status tg-bot-ytdl
+sudo journalctl -u tg-bot-ytdl -f
+sudo systemctl stop tg-bot-ytdl          # עצירה יזומה, לא עולה לבד
+tail -f logs/bot.log logs/ytdlp_update.log
+```
+
+בדיקת גרסה ב-01:00 **לא** מכבה את הבוט אם אין עדכון. אם יש — מצב תחזוקה, ריקון תור, `pip` ב-wrapper, עלייה מחדש.
 
 ### שימוש בבוט
 
@@ -237,6 +270,8 @@ TG-bot-YTDL/
 ├── requirements.txt      # חבילות נדרשות
 ├── .env                  # הגדרות (לא לשיתוף!)
 ├── .env.example          # דוגמה להגדרות
+├── ytdlp_updater.py       # בדיקת גרסה + מצב תחזוקה
+├── deploy/systemd/        # unit files לדוגמה (Linux)
 ├── downloads/            # תיקיית הורדות זמנית
 ├── logs/                 # קבצי לוג
 ├── venv/                 # סביבה וירטואלית

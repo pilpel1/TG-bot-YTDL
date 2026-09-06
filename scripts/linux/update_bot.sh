@@ -1,31 +1,25 @@
 #!/bin/bash
+# Pulls code from git. Local runtime files that git already ignores
+# (.env, data/, logs/, cookies, downloads, venv) are left on disk.
+# Only .env is backed up/restored as a safety net, in case it was
+# ever tracked. Do not copy data/ or logs/ over themselves — that
+# can wipe a pending-update flag or overwrite new log lines.
 
 echo "[>>] Starting backup process..."
 
-# Get project root directory (go up from scripts/linux)
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_DIR"
 
-# Set default branch
 BRANCH="main"
-
-# If parameter provided, use it as branch
-if [ ! -z "$1" ]; then
+if [ -n "${1:-}" ]; then
     BRANCH="$1"
 fi
 
-# Backup important files
-mkdir -p backup/logs
+mkdir -p backup
 
-echo "[>>] Backing up configuration and logs..."
-# Copy config file
+echo "[>>] Backing up .env (gitignored; restore is only a safety net)..."
 if [ -f ".env" ]; then
     cp .env backup/.env
-fi
-
-# Copy logs directory
-if [ -d "logs" ]; then
-    cp -r logs/* backup/logs/ 2>/dev/null || true
 fi
 
 echo "[>>] Updating code from git (branch: $BRANCH)..."
@@ -43,24 +37,27 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-echo "[>>] Restoring backup files..."
-# Restore important files
 if [ -f "backup/.env" ]; then
     cp backup/.env .env
 fi
 
-if [ -d "backup/logs" ]; then
-    cp -r backup/logs/* logs/ 2>/dev/null || true
-fi
-
-echo "[>>] Updating Python dependencies..."
+echo "[>>] Updating Python dependencies (exactly what requirements.txt asks)..."
 if [ -f "venv/bin/activate" ]; then
+    # shellcheck disable=SC1091
     source venv/bin/activate
-    pip install -r requirements.txt --upgrade
+    pip install -r requirements.txt
     echo "✓ Dependencies updated"
 else
     echo "⚠ Virtual environment not found"
 fi
 
+if systemctl list-unit-files tg-bot-ytdl.service >/dev/null 2>&1; then
+    echo
+    echo "[>>] systemd unit tg-bot-ytdl is installed."
+    echo "    New code is on disk; restart to load it:"
+    echo "    sudo systemctl restart tg-bot-ytdl"
+fi
+
 echo "[>>] Update completed successfully!"
+echo "    Left untouched: data/, logs/, cookies, downloads, venv contents (except pip above)."
 sleep 3
