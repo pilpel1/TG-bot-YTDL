@@ -33,7 +33,7 @@ scripts/
 - **`install_systemd.sh`** - מזהה נתיב פרויקט + יוזר, וכותב את יחידות systemd ל-`/etc` (לא לשמור נתיב אישי בגיט)
 - **`run_bot_service.sh`** - הפעלת פרודקשן ל-systemd (ממתין ל-Local API, מעדכן yt-dlp אם יש סימון, מריץ את הבוט)
 - **`run_local_api_service.sh`** - Local API ב-foreground ל-systemd (עם volume קבוע)
-- **`update_bot.sh`** - `git pull` + התקנת תלויות מ-`requirements.txt`; משאיר `.env` / `data/` / לוגים / cookies על הדיסק
+- **`update_bot.sh`** - `git pull` + תלויות מ-`requirements.txt`; גיבוי `.env` + צילום `logs/` ל-`backup/logs`; לא דורס `data/` / לוגים חיים / cookies
 - **`update_ytdlp.sh`** - עדכון yt-dlp
 
 ### סקריפטי עזר:

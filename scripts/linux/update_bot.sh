@@ -1,9 +1,9 @@
 #!/bin/bash
 # Pulls code from git. Local runtime files that git already ignores
-# (.env, data/, logs/, cookies, downloads, venv) are left on disk.
-# Only .env is backed up/restored as a safety net, in case it was
-# ever tracked. Do not copy data/ or logs/ over themselves — that
-# can wipe a pending-update flag or overwrite new log lines.
+# (.env, data/, logs/, cookies, downloads, venv) stay on disk.
+# .env is backed up and restored (safety net if it was ever tracked).
+# logs/ is copied to backup/logs as a snapshot, but not copied back —
+# restoring would overwrite new lines written during the pull.
 
 echo "[>>] Starting backup process..."
 
@@ -15,11 +15,16 @@ if [ -n "${1:-}" ]; then
     BRANCH="$1"
 fi
 
-mkdir -p backup
+mkdir -p backup/logs
 
 echo "[>>] Backing up .env (gitignored; restore is only a safety net)..."
 if [ -f ".env" ]; then
     cp .env backup/.env
+fi
+
+echo "[>>] Backing up logs to backup/logs (snapshot; live logs/ stay as-is)..."
+if [ -d "logs" ]; then
+    cp -r logs/. backup/logs/ 2>/dev/null || true
 fi
 
 echo "[>>] Updating code from git (branch: $BRANCH)..."
@@ -59,5 +64,6 @@ if systemctl list-unit-files tg-bot-ytdl.service >/dev/null 2>&1; then
 fi
 
 echo "[>>] Update completed successfully!"
-echo "    Left untouched: data/, logs/, cookies, downloads, venv contents (except pip above)."
+echo "    Logs snapshot: backup/logs  |  live logs/ left in place"
+echo "    Left untouched: data/, cookies, downloads, venv contents (except pip above)."
 sleep 3
