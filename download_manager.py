@@ -4,6 +4,7 @@ import telegram
 from pathlib import Path
 from logger_setup import logger, log_download
 from config import DOWNLOADS_DIR, MAX_FILE_SIZE, FACEBOOK_COOKIES_FILE
+from download_cache import get_cached_file, save_cached_file, delete_cached_file
 from utils import (
     send_video_with_long_caption,
     is_ffmpeg_available,
@@ -69,6 +70,48 @@ def extract_max_height_from_format(format_spec):
     """מחלץ את מגבלת הגובה מ-format selector של yt-dlp."""
     match = re.search(r'height<=(\d+)', format_spec or '')
     return int(match.group(1)) if match else None
+
+
+async def try_send_cached_media(status_message, context, cached_entry, quality, download_mode,
+                                 is_playlist, quiet_complete):
+    """מנסה לשלוח קובץ ישירות לפי file_id שמור, בלי להוריד כלום.
+
+    מחזיר True בהצלחה. False אם ה-file_id כבר לא תקף (למשל טלגרם מחק את
+    הקובץ אחרי הרבה זמן) - במקרה כזה הקורא אחראי למחוק את רשומת ה-cache
+    ולהמשיך בזרימת ההורדה הרגילה."""
+    file_id = cached_entry['file_id']
+    title = cached_entry.get('title') or ('Audio' if download_mode == 'audio' else 'Video')
+
+    try:
+        if download_mode == 'audio':
+            await status_message.get_bot().send_audio(
+                chat_id=status_message.chat_id,
+                audio=file_id,
+                title=title,
+            )
+        else:
+            await status_message.get_bot().send_video(
+                chat_id=status_message.chat_id,
+                video=file_id,
+                caption=title,
+                supports_streaming=True,
+            )
+    except Exception as e:
+        logger.warning(f"Cached file_id could not be sent, will re-download: {e}")
+        return False
+
+    if not is_playlist:
+        if not quiet_complete:
+            quality_msg = f" ({quality['quality_name']})" if quality['quality_name'] != 'איכות רגילה' else ""
+            await status_message.get_bot().send_message(
+                chat_id=status_message.chat_id,
+                text=f'הנה הקובץ שלך! (מהמטמון ⚡){quality_msg} 🎉'
+            )
+        await safe_delete_message(status_message)
+        context.user_data.pop('current_quality_index', None)
+
+    logger.info("Sent cached file_id instead of re-downloading")
+    return True
 
 
 def build_cancellation_progress_hook(should_cancel):
@@ -312,6 +355,27 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         if 'x.com' in url:
             url = url.replace('x.com', 'twitter.com')
             logger.info(f"Converting X URL to Twitter URL: {url}")
+
+        # נשמר *לפני* כל נירמול פלטפורמה-ספציפי שקורה בהמשך (tiktok/facebook
+        # משנים את url בהמשך הפונקציה) - כדי שמפתח ה-cache יהיה זהה בין
+        # קריאה שרק בודקת cache (עכשיו) לקריאה שתשמור אליו בסוף ההורדה,
+        # גם אם url עצמו ישתנה באמצע. אותו קישור גולמי -> אותו מפתח, תמיד.
+        cache_url_key = url
+        cached_entry = get_cached_file(cache_url_key, download_mode, quality['quality_name'])
+        if cached_entry:
+            logger.info(f"Cache hit for {cache_url_key} ({download_mode}/{quality['quality_name']})")
+            if await try_send_cached_media(
+                status_message, context, cached_entry, quality, download_mode,
+                is_playlist, quiet_complete
+            ):
+                log_download(
+                    username=get_user_identifier(status_message.chat),
+                    url=url,
+                    download_type=download_mode,
+                    filename=f"[cache] {cached_entry.get('title') or ''}"
+                )
+                return
+            delete_cached_file(cache_url_key, download_mode, quality['quality_name'])
 
         # בדיקה אם זה פלייליסט
         if not is_playlist:
@@ -774,9 +838,10 @@ async def download_with_quality(context, status_message, url, download_mode, qua
             
             if size_mb <= MAX_FILE_SIZE / (1024 * 1024):
                 try:
+                    sent_message = None
                     with open(current_file, 'rb') as f:
                         if download_mode == 'audio':
-                            await status_message.get_bot().send_audio(
+                            sent_message = await status_message.get_bot().send_audio(
                                 chat_id=status_message.chat_id,
                                 audio=f,
                                 title=info.get('title', 'Audio'),
@@ -793,7 +858,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                 if thumbnail_file.stat().st_size > 0:
                                     thumbnail_input = thumbnail_file
                                 
-                            await send_video_with_long_caption(
+                            sent_message = await send_video_with_long_caption(
                                 status_message,
                                 f,
                                 info,
@@ -807,7 +872,27 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                 connect_timeout=UPLOAD_TIMEOUT_SECONDS,
                                 pool_timeout=UPLOAD_TIMEOUT_SECONDS
                             )
-                    
+
+                    # שמירת file_id ל-cache - כך שהורדה הבאה של אותו
+                    # סרטון/מצב/איכות תישלח מיד בלי להוריד שוב מיוטיוב.
+                    try:
+                        cached_file_id = None
+                        if sent_message:
+                            if download_mode == 'audio' and sent_message.audio:
+                                cached_file_id = sent_message.audio.file_id
+                            elif download_mode == 'video' and sent_message.video:
+                                cached_file_id = sent_message.video.file_id
+                        if cached_file_id:
+                            save_cached_file(
+                                cache_url_key,
+                                download_mode,
+                                quality['quality_name'],
+                                cached_file_id,
+                                title=info.get('title'),
+                            )
+                    except Exception as cache_error:
+                        logger.warning(f"Could not save download cache entry: {cache_error}")
+
                     # רישום ההורדה
                     log_download(
                         username=get_user_identifier(status_message.chat),
