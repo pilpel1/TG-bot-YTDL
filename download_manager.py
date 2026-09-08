@@ -114,6 +114,29 @@ async def try_send_cached_media(status_message, context, cached_entry, quality, 
     return True
 
 
+def build_quality_cache_token(download_mode, quality):
+    """מזהה 'איכות' יציב לצורך cache - מבוסס על מגבלת הגובה שבפועל ב-format
+    spec (height<=NNN), ולא על quality['quality_name'] הטקסטואלי.
+
+    יש כיום 3 מקורות שונים ל-quality_name לוידאו יוטיוב, עם תוויות לא
+    עקביות בין flows:
+    - בחירה ידנית לסרטון בודד: תוויות דינמיות לפי רזולוציות זמינות בפועל
+      (utils.build_youtube_quality_option -> f'{height}p', למשל '720p').
+    - פלייליסט/מיקס: תוויות קבועות (utils.build_youtube_playlist_download_options
+      -> 'איכות גבוהה'/'רגילה'/'נמוכה'), עם format string משלהן.
+    - מעקב ערוצים: 'איכות רגילה' מ-config.YOUTUBE_QUALITY_LEVELS
+      (channel_watch.FIXED_VIDEO_QUALITY), עם format string שלישי, נפרד.
+
+    שלושתם יכולים לבקש בפועל את אותה מגבלת רזולוציה (height<=720) עם
+    quality_name שונה - ובלי הפונקציה הזו ה-cache היה מפספס בין flows (וגם
+    מסוכן להתלכד בטעות בין שני 'איכות רגילה' עם format string שונה).
+    """
+    if download_mode != 'video':
+        return 'audio'
+    max_height = extract_max_height_from_format((quality or {}).get('format'))
+    return f'h{max_height}' if max_height else 'uncapped'
+
+
 def build_cancellation_progress_hook(should_cancel):
     """בונה progress_hook ל-yt-dlp שבודק דגל ביטול ומעלה DownloadCancelled.
 
@@ -361,9 +384,10 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         # קריאה שרק בודקת cache (עכשיו) לקריאה שתשמור אליו בסוף ההורדה,
         # גם אם url עצמו ישתנה באמצע. אותו קישור גולמי -> אותו מפתח, תמיד.
         cache_url_key = url
-        cached_entry = get_cached_file(cache_url_key, download_mode, quality['quality_name'])
+        quality_cache_token = build_quality_cache_token(download_mode, quality)
+        cached_entry = get_cached_file(cache_url_key, download_mode, quality_cache_token)
         if cached_entry:
-            logger.info(f"Cache hit for {cache_url_key} ({download_mode}/{quality['quality_name']})")
+            logger.info(f"Cache hit for {cache_url_key} ({download_mode}/{quality_cache_token})")
             if await try_send_cached_media(
                 status_message, context, cached_entry, quality, download_mode,
                 is_playlist, quiet_complete
@@ -375,7 +399,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     filename=f"[cache] {cached_entry.get('title') or ''}"
                 )
                 return
-            delete_cached_file(cache_url_key, download_mode, quality['quality_name'])
+            delete_cached_file(cache_url_key, download_mode, quality_cache_token)
 
         # בדיקה אם זה פלייליסט
         if not is_playlist:
@@ -886,7 +910,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                             save_cached_file(
                                 cache_url_key,
                                 download_mode,
-                                quality['quality_name'],
+                                quality_cache_token,
                                 cached_file_id,
                                 title=info.get('title'),
                             )

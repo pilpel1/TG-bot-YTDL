@@ -16,6 +16,11 @@ AUDIO_QUALITY = {'format': 'bestaudio', 'quality_name': 'audio-only'}
 VIDEO_QUALITY = {'format': 'best[height<=720]', 'quality_name': 'regular'}
 URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
 
+# ה-cache לא משתמש ב-quality_name הטקסטואלי כמפתח (ראו build_quality_cache_token) -
+# בבדיקות שמדברות ישירות מול download_cache (לא דרך download_with_quality) צריך
+# את אותו טוקן שהקוד האמיתי מחשב, אחרת הבדיקה בודקת מפתח שלעולם לא נוצר בפועל.
+AUDIO_TOKEN = download_manager.build_quality_cache_token('audio', AUDIO_QUALITY)
+
 
 @pytest.fixture(autouse=True)
 def _tmp_cache_db(tmp_path, monkeypatch):
@@ -53,9 +58,7 @@ def make_context():
 
 @pytest.mark.asyncio
 async def test_cache_hit_sends_file_id_without_touching_yt_dlp():
-    download_cache.save_cached_file(
-        URL, 'audio', AUDIO_QUALITY['quality_name'], 'CACHED_FILE_ID', title='Cached Song'
-    )
+    download_cache.save_cached_file(URL, 'audio', AUDIO_TOKEN, 'CACHED_FILE_ID', title='Cached Song')
     status_message, bot = make_status_message()
     context = make_context()
 
@@ -76,9 +79,8 @@ async def test_cache_hit_sends_file_id_without_touching_yt_dlp():
 
 @pytest.mark.asyncio
 async def test_cache_hit_video_sends_by_file_id():
-    download_cache.save_cached_file(
-        URL, 'video', VIDEO_QUALITY['quality_name'], 'CACHED_VIDEO_ID'
-    )
+    quality_token = download_manager.build_quality_cache_token('video', VIDEO_QUALITY)
+    download_cache.save_cached_file(URL, 'video', quality_token, 'CACHED_VIDEO_ID')
     status_message, bot = make_status_message()
     context = make_context()
 
@@ -95,7 +97,7 @@ async def test_cache_hit_video_sends_by_file_id():
 
 @pytest.mark.asyncio
 async def test_dead_file_id_is_evicted_and_falls_back_to_real_download():
-    download_cache.save_cached_file(URL, 'audio', AUDIO_QUALITY['quality_name'], 'DEAD_FILE_ID')
+    download_cache.save_cached_file(URL, 'audio', AUDIO_TOKEN, 'DEAD_FILE_ID')
 
     status_message, bot = make_status_message()
     bot.send_audio.side_effect = Exception('Wrong file identifier/HTTP URL specified')
@@ -113,7 +115,7 @@ async def test_dead_file_id_is_evicted_and_falls_back_to_real_download():
             )
 
     # ה-file_id המת הוסר מה-cache
-    assert download_cache.get_cached_file(URL, 'audio', AUDIO_QUALITY['quality_name']) is None
+    assert download_cache.get_cached_file(URL, 'audio', AUDIO_TOKEN) is None
     # וניסינו fallback אמיתי דרך yt-dlp (לא רק ויתרנו)
     mock_ydl_class.assert_called()
 
@@ -147,5 +149,5 @@ async def test_successful_download_saves_file_id_to_cache(tmp_path, monkeypatch)
     assert result is None
     bot.send_audio.assert_awaited_once()
 
-    cached = download_cache.get_cached_file(URL, 'audio', AUDIO_QUALITY['quality_name'])
+    cached = download_cache.get_cached_file(URL, 'audio', AUDIO_TOKEN)
     assert cached == {'file_id': 'NEW_FILE_ID', 'title': 'Never Gonna Give You Up'}
