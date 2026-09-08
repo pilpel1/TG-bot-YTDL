@@ -66,6 +66,7 @@ def mock_update():
 def mock_context():
     context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
     context.user_data = {}
+    context.bot_data = {}
     context.bot = MagicMock()
     context.bot.set_my_commands = AsyncMock()
     return context

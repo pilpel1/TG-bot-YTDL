@@ -97,6 +97,20 @@ def _env_float(name, default):
     return float(raw)
 
 
+def _env_id_list(name):
+    """רשימת Telegram user IDs מופרדות בפסיק. ריק = אף אחד."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == '':
+        return []
+    ids = []
+    for part in raw.split(','):
+        part = part.strip()
+        if not part:
+            continue
+        ids.append(int(part))
+    return ids
+
+
 def _env_hour_list(name, default):
     """רשימת שעות 0-23 מופרדות בפסיק. ריק = כבוי."""
     raw = os.getenv(name)
@@ -135,11 +149,12 @@ CHANNEL_WATCH_FETCH_LIMIT = _env_int('CHANNEL_WATCH_FETCH_LIMIT', 20)
 CHANNEL_WATCH_MAX_PER_USER = _env_int('CHANNEL_WATCH_MAX_PER_USER', 10)
 CHANNEL_WATCH_NOTIFIED_CAP = _env_int('CHANNEL_WATCH_NOTIFIED_CAP', 200)
 
+# אדמינים לפקודות פנימיות (/broadcast). ריק = אף אחד. לא לשים בגיט — רק ב-.env
+ADMIN_USER_IDS = frozenset(_env_id_list('ADMIN_USER_IDS'))
+
 # Version info
-VERSION = "0.12.0"
-CHANGELOG = """🆕 גרסה 0.12.0:
-💾 Cache הורדות - אותו סרטון לא יורד פעמיים
-• אחרי שליחת קובץ, נשמר מזהה קבוע של טלגרם (file_id) לפי סרטון+מצב+איכות
-• בקשה חוזרת לאותו סרטון נשלחת מיד, בלי הורדה חדשה מיוטיוב
-• עובד גם בין משתמשים שונים, גם מפלייליסט/חיפוש/מעקב ערוצים
-• אם הקובץ השמור כבר לא תקף - חוזר אוטומטית להורדה רגילה"""
+VERSION = "0.13.0"
+CHANGELOG = """🆕 גרסה 0.13.0:
+📣 שידור הודעה לאדמין
+• /broadcast — שליחת הודעה או תמונה לכל מי שכבר דיבר עם הבוט
+• דורש אישור לפני השידור; מי שחסם את הבוט נספר ולא עוצר את השאר"""

@@ -5,7 +5,7 @@ from logger_setup import logger
 from config import BOT_TOKEN, LOCAL_API_AVAILABLE, LOCAL_API_BASE_URL, LOCAL_API_FILE_URL
 from bot_handlers import (
     start, ask_format, button_click, handle_thank_you, version, help_command, mode,
-    stop_download, search_mode, channels_command, build_bot_commands,
+    stop_download, search_mode, channels_command, broadcast_command, build_bot_commands,
     refresh_all_user_command_menus,
 )
 from utils import cleanup_temp_files, check_ffmpeg_on_startup
@@ -127,6 +127,7 @@ def main():
         application.add_handler(CommandHandler('stop', stop_download))
         application.add_handler(CommandHandler('search_mode', search_mode))
         application.add_handler(CommandHandler('channels', channels_command))
+        application.add_handler(CommandHandler('broadcast', broadcast_command))
         # תפיסת כל סוגי ההודעות חוץ מפקודות
         application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, ask_format))
         application.add_handler(CallbackQueryHandler(button_click))

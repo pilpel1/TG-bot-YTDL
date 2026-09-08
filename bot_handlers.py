@@ -41,6 +41,7 @@ from channel_watch import (
     description_label_he,
     format_watch_schedule_he,
 )
+from broadcast import is_admin, list_broadcast_targets, run_broadcast
 from utils import (
     fetch_youtube_download_options,
     build_youtube_audio_option,
@@ -945,6 +946,10 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_channel_wizard_url(update, context, text)
         return
 
+    if is_admin(update.effective_user.id) and context.user_data.get('awaiting_broadcast'):
+        await offer_broadcast_confirm(message, context, message)
+        return
+
     # קישור תמיד מנצח — גם אם יש מסביב טקסט ארוך / "תודה" / מצב חיפוש דלוק
     if valid_urls:
         if is_maintenance_mode():
@@ -1274,6 +1279,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text('בוטל. אפשר לשלוח קישור או חיפוש חדש.')
         return
 
+    if query.data.startswith('bc_'):
+        await handle_broadcast_callback(query, context)
+        return
+
     if query.data.startswith('ch_'):
         await handle_channel_callback(query, context)
         return
@@ -1544,3 +1553,122 @@ async def mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • `run_bot_advanced_2GB` - חכם עם auto-fallback"""
 
     await update.message.reply_text(message, parse_mode='Markdown')
+
+
+def _clear_broadcast_state(context):
+    context.user_data.pop('awaiting_broadcast', None)
+    context.user_data.pop('broadcast_from_chat_id', None)
+    context.user_data.pop('broadcast_message_id', None)
+
+
+def build_broadcast_confirm_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton('שגר ✅', callback_data='bc_ok')],
+        [InlineKeyboardButton('בטל', callback_data='bc_no')],
+    ])
+
+
+async def offer_broadcast_confirm(reply_to, context, source_message):
+    """מציג אישור שידור להודעה שכבר קיימת בצ'אט."""
+    from_chat_id = source_message.chat_id
+    message_id = source_message.message_id
+    targets = list_broadcast_targets(exclude_chat_id=from_chat_id)
+    if not targets:
+        _clear_broadcast_state(context)
+        await reply_to.reply_text('אין משתמשים ברשימה לשידור (חוץ ממך).')
+        return
+
+    context.user_data['awaiting_broadcast'] = False
+    context.user_data['broadcast_from_chat_id'] = from_chat_id
+    context.user_data['broadcast_message_id'] = message_id
+    await reply_to.reply_text(
+        f'לשגר את ההודעה הזו ל-{len(targets)} משתמשים?\n'
+        'הצ׳אט שלך לא ייכלל.',
+        reply_markup=build_broadcast_confirm_keyboard(),
+        quote=True,
+    )
+
+
+async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/broadcast — אדמין בלבד, לא בתפריט. בלי ID ב-.env הפקודה שותקת."""
+    user = update.effective_user
+    message = update.message
+    if not user or not message or not is_admin(user.id):
+        return
+
+    _clear_broadcast_state(context)
+    replied = message.reply_to_message
+    if replied:
+        await offer_broadcast_confirm(message, context, replied)
+        return
+
+    context.user_data['awaiting_broadcast'] = True
+    await message.reply_text(
+        'שלח עכשיו את ההודעה או התמונה לשידור.\n'
+        'אפשר גם להשיב עם /broadcast על הודעה שכבר שלחת כאן.'
+    )
+
+
+async def handle_broadcast_callback(query, context):
+    if not is_admin(query.from_user.id):
+        await query.answer()
+        return
+
+    if query.data == 'bc_no':
+        _clear_broadcast_state(context)
+        await query.answer('בוטל')
+        await query.message.edit_text('השידור בוטל.')
+        return
+
+    if query.data != 'bc_ok':
+        await query.answer()
+        return
+
+    if context.bot_data.get('broadcast_running'):
+        await query.answer('שידור כבר רץ')
+        return
+
+    from_chat_id = context.user_data.get('broadcast_from_chat_id')
+    message_id = context.user_data.get('broadcast_message_id')
+    if from_chat_id is None or message_id is None:
+        await query.answer('אין הודעה לשידור')
+        await query.message.edit_text('אין הודעה שמורה לשידור. שלח /broadcast שוב.')
+        return
+
+    targets = list_broadcast_targets(exclude_chat_id=from_chat_id)
+    if not targets:
+        _clear_broadcast_state(context)
+        await query.answer()
+        await query.message.edit_text('אין משתמשים ברשימה לשידור.')
+        return
+
+    context.bot_data['broadcast_running'] = True
+    _clear_broadcast_state(context)
+    await query.answer()
+    await query.message.edit_text(f'משגר ל-{len(targets)} משתמשים...')
+
+    async def on_progress(sent, blocked, failed, total):
+        try:
+            await query.message.edit_text(
+                f'משגר... {sent + blocked + failed}/{total}'
+            )
+        except Exception:
+            pass
+
+    try:
+        sent, blocked, failed = await run_broadcast(
+            context.bot,
+            from_chat_id,
+            message_id,
+            targets,
+            on_progress=on_progress,
+        )
+    finally:
+        context.bot_data['broadcast_running'] = False
+
+    summary = f'השידור הסתיים.\nנשלח: {sent}'
+    if blocked:
+        summary += f'\nחסמו את הבוט: {blocked}'
+    if failed:
+        summary += f'\nנכשל: {failed}'
+    await query.message.edit_text(summary)
