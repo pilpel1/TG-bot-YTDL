@@ -15,6 +15,7 @@ from download_manager import (
     build_youtube_video_format,
     build_youtube_video_fallback_formats,
     build_cancellation_progress_hook,
+    build_quality_cache_token,
     download_with_quality,
 )
 from utils import (
@@ -838,6 +839,37 @@ def test_cancellation_progress_hook_does_nothing_when_should_cancel_false():
 def test_cancellation_progress_hook_does_nothing_when_should_cancel_none():
     hook = build_cancellation_progress_hook(None)
     hook({'status': 'downloading'})  # לא אמור לזרוק שום דבר
+
+# Cache Quality Token Tests
+def test_cache_quality_token_is_audio_regardless_of_format():
+    assert build_quality_cache_token('audio', {'format': 'bestaudio[ext=m4a]/bestaudio'}) == 'audio'
+    assert build_quality_cache_token('audio', {'format': 'best'}) == 'audio'
+
+def test_cache_quality_token_extracts_capped_height():
+    assert build_quality_cache_token('video', {'format': 'best[height<=720]'}) == 'h720'
+
+def test_cache_quality_token_uncapped_format_has_dedicated_bucket():
+    assert build_quality_cache_token('video', {'format': 'best'}) == 'uncapped'
+
+def test_cache_quality_token_matches_across_manual_playlist_and_channel_watch_flows():
+    """שלושת המקורות ל'איכות רגילה' (בחירה ידנית ל-720p, אופציית פלייליסט,
+    ואיכות קבועה של מעקב ערוצים) חייבים להתלכד לאותו bucket ב-cache, למרות
+    שיש להם quality_name ו-format string שונים לגמרי בפועל."""
+    manual_720p = {'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]', 'quality_name': '720p'}
+    playlist_regular = YOUTUBE_QUALITY_LEVELS[1]  # quality_name='איכות רגילה', capped at 720
+    channel_watch_fixed = YOUTUBE_QUALITY_LEVELS[1]  # channel_watch.FIXED_VIDEO_QUALITY משתמש באותו מקור
+
+    tokens = {
+        build_quality_cache_token('video', manual_720p),
+        build_quality_cache_token('video', playlist_regular),
+        build_quality_cache_token('video', channel_watch_fixed),
+    }
+    assert tokens == {'h720'}
+
+def test_cache_quality_token_differs_between_height_caps():
+    high = {'format': 'best[height<=1080]'}
+    low = {'format': 'best[height<=480]'}
+    assert build_quality_cache_token('video', high) != build_quality_cache_token('video', low)
 
 @pytest.mark.asyncio
 async def test_download_with_quality_returns_immediately_when_already_cancelled(mock_context):
