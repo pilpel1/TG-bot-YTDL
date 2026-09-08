@@ -62,12 +62,11 @@ def test_is_admin_reads_config(monkeypatch, admin_id):
     assert is_admin(None) is False
 
 
-def test_list_broadcast_targets_skips_sender(monkeypatch):
+def test_list_broadcast_targets_includes_all(monkeypatch):
     monkeypatch.setattr(
         'broadcast.list_known_chat_ids',
         lambda: ['42', '100', '200'],
     )
-    assert list_broadcast_targets(exclude_chat_id=42) == [100, 200]
     assert list_broadcast_targets() == [42, 100, 200]
 
 
@@ -111,7 +110,9 @@ async def test_broadcast_command_reply_offers_confirm(mock_update, mock_context,
     photo.chat_id = admin_id
     photo.message_id = 77
     mock_update.message.reply_to_message = photo
-    with patch('bot_handlers.list_broadcast_targets', return_value=[100, 200]):
+    with patch('bot_handlers.list_broadcast_targets', return_value=[100, 200]), \
+         patch('bot_handlers.backfill_known_user_profiles', new_callable=AsyncMock), \
+         patch('bot_handlers.format_known_user_label', side_effect=lambda chat_id, record=None: str(chat_id)):
         await broadcast_command(mock_update, mock_context)
     assert mock_context.user_data['broadcast_message_id'] == 77
     text = mock_update.message.reply_text.call_args[0][0]
@@ -125,6 +126,8 @@ async def test_ask_format_intercepts_awaiting_broadcast(mock_update, mock_contex
     mock_context.user_data['awaiting_broadcast'] = True
     with patch('bot_handlers.ensure_command_menu_synced', new_callable=AsyncMock), \
          patch('bot_handlers.list_broadcast_targets', return_value=[100]), \
+         patch('bot_handlers.backfill_known_user_profiles', new_callable=AsyncMock), \
+         patch('bot_handlers.format_known_user_label', side_effect=lambda chat_id, record=None: str(chat_id)), \
          patch('bot_handlers.begin_youtube_download_flow') as start_dl:
         await ask_format(mock_update, mock_context)
     start_dl.assert_not_called()

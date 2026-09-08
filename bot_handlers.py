@@ -20,7 +20,9 @@ from user_settings import (
     get_search_mode,
     set_search_mode,
     remember_chat,
+    remember_from_update,
     list_known_chat_ids,
+    format_known_user_label,
     list_channel_subs,
     get_channel_sub,
     add_channel_sub,
@@ -135,6 +137,11 @@ async def enqueue_download_job(context, status_message, coro_factory, weight=1, 
     )
 
 
+async def remember_incoming(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """group=-1: רושם כל משתמש שנוגע בבוט, בלי לבלוע את ההודעה."""
+    remember_from_update(update)
+
+
 async def stop_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """פקודת /stop - מבטלת את ההורדה הפעילה/הממתינה בתור של המשתמש הזה, אם יש."""
     chat_id = update.effective_chat.id
@@ -239,14 +246,14 @@ def is_search_mode_enabled(context, user_id=None) -> bool:
     return bool(context.user_data['search_mode'])
 
 
-def build_bot_commands(search_mode_on: bool = False):
+def build_bot_commands(search_mode_on: bool = False, include_admin: bool = False):
     """בונה רשימת פקודות לתפריט טלגרם, עם סטטוס מצב חיפוש בתיאור."""
     search_desc = (
         'מצב חיפוש (פעיל כעת)'
         if search_mode_on
         else 'מצב חיפוש (כבוי כעת)'
     )
-    return [
+    commands = [
         BotCommand('start', 'הודעת פתיחה'),
         BotCommand('help', 'עזרה, פקודות ומגבלת קבצים'),
         BotCommand('search_mode', search_desc),
@@ -254,6 +261,13 @@ def build_bot_commands(search_mode_on: bool = False):
         BotCommand('stop', 'ביטול הורדה פעילה או ממתינה'),
         BotCommand('version', 'גרסה נוכחית ושינויים'),
     ]
+    if include_admin:
+        commands.extend([
+            BotCommand('broadcast', 'שידור הודעה לכל המשתמשים (אדמין)'),
+            BotCommand('users', 'רשימת משתמשים (אדמין)'),
+            BotCommand('mode', 'מצב שרת ומגבלת קבצים (אדמין)'),
+        ])
+    return commands
 
 
 async def sync_user_command_menu(bot, chat_id, search_mode_on: bool):
@@ -265,7 +279,7 @@ async def sync_user_command_menu(bot, chat_id, search_mode_on: bool):
     remember_chat(chat_id)
     try:
         await bot.set_my_commands(
-            build_bot_commands(search_mode_on),
+            build_bot_commands(search_mode_on, include_admin=is_admin(chat_id)),
             scope=BotCommandScopeChat(chat_id=chat_id),
         )
     except Exception as e:
@@ -1561,6 +1575,17 @@ def _clear_broadcast_state(context):
     context.user_data.pop('broadcast_message_id', None)
 
 
+def format_broadcast_recipient_lines(targets) -> str:
+    """שמות ליעד שידור. שם חסר → המספר, בלי להפיל את השידור."""
+    lines = []
+    for chat_id in targets:
+        try:
+            lines.append(f'• {format_known_user_label(chat_id)}')
+        except Exception:
+            lines.append(f'• {chat_id}')
+    return '\n'.join(lines)
+
+
 def build_broadcast_confirm_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton('שגר ✅', callback_data='bc_ok')],
@@ -1572,18 +1597,23 @@ async def offer_broadcast_confirm(reply_to, context, source_message):
     """מציג אישור שידור להודעה שכבר קיימת בצ'אט."""
     from_chat_id = source_message.chat_id
     message_id = source_message.message_id
-    targets = list_broadcast_targets(exclude_chat_id=from_chat_id)
+    targets = list_broadcast_targets()
     if not targets:
         _clear_broadcast_state(context)
-        await reply_to.reply_text('אין משתמשים ברשימה לשידור (חוץ ממך).')
+        await reply_to.reply_text('אין משתמשים ברשימה לשידור.')
         return
 
     context.user_data['awaiting_broadcast'] = False
     context.user_data['broadcast_from_chat_id'] = from_chat_id
     context.user_data['broadcast_message_id'] = message_id
+    try:
+        await backfill_known_user_profiles(context.bot)
+    except Exception as e:
+        logger.warning(f"Broadcast name backfill failed: {e}")
+    names = format_broadcast_recipient_lines(targets)
     await reply_to.reply_text(
         f'לשגר את ההודעה הזו ל-{len(targets)} משתמשים?\n'
-        'הצ׳אט שלך לא ייכלל.',
+        f'{names}',
         reply_markup=build_broadcast_confirm_keyboard(),
         quote=True,
     )
@@ -1635,7 +1665,7 @@ async def handle_broadcast_callback(query, context):
         await query.message.edit_text('אין הודעה שמורה לשידור. שלח /broadcast שוב.')
         return
 
-    targets = list_broadcast_targets(exclude_chat_id=from_chat_id)
+    targets = list_broadcast_targets()
     if not targets:
         _clear_broadcast_state(context)
         await query.answer()
@@ -1672,3 +1702,38 @@ async def handle_broadcast_callback(query, context):
     if failed:
         summary += f'\nנכשל: {failed}'
     await query.message.edit_text(summary)
+
+
+async def backfill_known_user_profiles(bot):
+    """משלים שמות ל-IDs שכבר שמורים, דרך getChat."""
+    for chat_id in list_known_chat_ids():
+        label = format_known_user_label(chat_id)
+        if label != str(chat_id):
+            continue
+        try:
+            chat = await bot.get_chat(int(chat_id))
+            remember_chat(chat_id, chat=chat)
+        except Exception as e:
+            logger.warning(f"Could not resolve name for chat {chat_id}: {e}")
+
+
+async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/users — אדמין בלבד. רשימת מי שמוכר לבוט, עם שמות."""
+    user = update.effective_user
+    message = update.message
+    if not user or not message or not is_admin(user.id):
+        return
+
+    try:
+        await backfill_known_user_profiles(context.bot)
+    except Exception as e:
+        logger.warning(f"Could not backfill user names: {e}")
+    chat_ids = list_known_chat_ids()
+    if not chat_ids:
+        await message.reply_text('אין עדיין משתמשים שמורים.')
+        return
+
+    names = format_broadcast_recipient_lines(chat_ids)
+    await message.reply_text(
+        f'{len(chat_ids)} משתמשים ידועים:\n{names}'
+    )

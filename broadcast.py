@@ -15,18 +15,10 @@ def is_admin(user_id) -> bool:
         return False
 
 
-def list_broadcast_targets(exclude_chat_id=None):
-    """chat_ids לשידור, בלי הצ'אט של השולח."""
-    skip = None
-    if exclude_chat_id is not None:
-        try:
-            skip = str(int(exclude_chat_id))
-        except (TypeError, ValueError):
-            skip = str(exclude_chat_id)
+def list_broadcast_targets():
+    """כל ה-chat_ids לשידור, כולל האדמין."""
     targets = []
     for chat_id in list_known_chat_ids():
-        if skip is not None and str(chat_id) == skip:
-            continue
         try:
             targets.append(int(chat_id))
         except (TypeError, ValueError):

@@ -25,6 +25,7 @@ from logger_setup import logger
 from user_settings import (
     get_channel_watch_last_run,
     iter_all_channel_subs,
+    remember_chat,
     set_channel_watch_last_run,
     update_channel_sub,
 )
@@ -433,6 +434,7 @@ async def deliver_new_video(application, chat_id, sub, entry):
         video_url,
         description,
     )
+    remember_chat(chat_id)
     await application.bot.send_message(
         chat_id=int(chat_id),
         text=announcement,

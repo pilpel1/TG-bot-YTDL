@@ -5,7 +5,8 @@ from logger_setup import logger
 from config import BOT_TOKEN, LOCAL_API_AVAILABLE, LOCAL_API_BASE_URL, LOCAL_API_FILE_URL
 from bot_handlers import (
     start, ask_format, button_click, handle_thank_you, version, help_command, mode,
-    stop_download, search_mode, channels_command, broadcast_command, build_bot_commands,
+    stop_download, search_mode, channels_command, broadcast_command, users_command,
+    remember_incoming, build_bot_commands,
     refresh_all_user_command_menus,
 )
 from utils import cleanup_temp_files, check_ffmpeg_on_startup
@@ -119,6 +120,9 @@ def main():
                           .post_stop(post_stop)
                           .build())
         
+        # group=-1 רץ בנוסף ל-group 0: רושם ID+שם בלי לבלוע הודעות/פקודות
+        application.add_handler(MessageHandler(filters.ALL, remember_incoming), group=-1)
+        application.add_handler(CallbackQueryHandler(remember_incoming), group=-1)
         # Add handlers
         application.add_handler(CommandHandler('start', start))
         application.add_handler(CommandHandler('help', help_command))
@@ -128,6 +132,7 @@ def main():
         application.add_handler(CommandHandler('search_mode', search_mode))
         application.add_handler(CommandHandler('channels', channels_command))
         application.add_handler(CommandHandler('broadcast', broadcast_command))
+        application.add_handler(CommandHandler('users', users_command))
         # תפיסת כל סוגי ההודעות חוץ מפקודות
         application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, ask_format))
         application.add_handler(CallbackQueryHandler(button_click))

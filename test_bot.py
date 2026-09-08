@@ -34,7 +34,7 @@ from utils import (
 # Fixtures
 @pytest.fixture(autouse=True)
 def _dont_write_known_chats(monkeypatch):
-    monkeypatch.setattr('bot_handlers.remember_chat', lambda chat_id: None)
+    monkeypatch.setattr('bot_handlers.remember_chat', lambda *args, **kwargs: None)
 
 
 @pytest.fixture
@@ -314,6 +314,11 @@ def test_build_bot_commands_reflects_search_mode_status():
     assert off_search.description == 'מצב חיפוש (כבוי כעת)'
     assert on_search.description == 'מצב חיפוש (פעיל כעת)'
     assert any(c.command == 'channels' for c in off_commands)
+    assert not any(c.command == 'broadcast' for c in off_commands)
+    admin_commands = build_bot_commands(False, include_admin=True)
+    admin_names = [c.command for c in admin_commands]
+    assert admin_names[-3:] == ['broadcast', 'users', 'mode']
+    assert all('(אדמין)' in c.description for c in admin_commands if c.command in ('broadcast', 'users', 'mode'))
 
 
 @pytest.mark.asyncio

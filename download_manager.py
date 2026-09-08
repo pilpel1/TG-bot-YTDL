@@ -3,6 +3,7 @@ import yt_dlp
 import telegram
 from pathlib import Path
 from logger_setup import logger, log_download
+from user_settings import remember_chat
 from config import DOWNLOADS_DIR, MAX_FILE_SIZE, FACEBOOK_COOKIES_FILE
 from download_cache import get_cached_file, save_cached_file, delete_cached_file
 from utils import (
@@ -398,6 +399,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     download_type=download_mode,
                     filename=f"[cache] {cached_entry.get('title') or ''}"
                 )
+                remember_chat(status_message.chat_id, chat=status_message.chat)
                 return
             delete_cached_file(cache_url_key, download_mode, quality_cache_token)
 
@@ -924,6 +926,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                         download_type=download_mode,
                         filename=current_file.name
                     )
+                    remember_chat(status_message.chat_id, chat=status_message.chat)
                     
                     if not is_playlist:
                         if not quiet_complete:

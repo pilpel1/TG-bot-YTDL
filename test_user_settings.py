@@ -1,10 +1,13 @@
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 from user_settings import (
     get_search_mode,
     set_search_mode,
     remember_chat,
+    remember_from_update,
     list_known_chat_ids,
+    format_known_user_label,
     add_channel_sub,
     list_channel_subs,
     update_channel_sub,
@@ -104,3 +107,39 @@ def test_known_chats_and_list_includes_search_and_subs(tmp_path, monkeypatch):
     add_channel_sub(333, _sample_sub('C', 'UCc'))
 
     assert set(list_known_chat_ids()) == {'111', '222', '333'}
+
+
+def test_known_chats_migrates_list_and_stores_names(tmp_path, monkeypatch):
+    monkeypatch.setattr(user_settings, 'DATA_DIR', tmp_path)
+    monkeypatch.setattr(user_settings, 'SEARCH_MODES_FILE', tmp_path / 'search_modes.json')
+    monkeypatch.setattr(user_settings, 'CHANNEL_SUBS_FILE', tmp_path / 'channel_subscriptions.json')
+    monkeypatch.setattr(user_settings, 'KNOWN_CHATS_FILE', tmp_path / 'known_chats.json')
+    (tmp_path / 'known_chats.json').write_text('["111", "222"]', encoding='utf-8')
+
+    user = MagicMock()
+    user.first_name = 'דביר'
+    user.last_name = ''
+    user.username = 'dvir'
+    remember_chat(111, user=user)
+
+    assert format_known_user_label(111) == 'דביר (@dvir)'
+    assert format_known_user_label(222) == '222'
+    assert format_known_user_label(222, record='bad') == '222'
+    assert format_known_user_label(222, record=None) == '222'
+    assert set(list_known_chat_ids()) == {'111', '222'}
+
+
+def test_remember_from_update_uses_effective_user(tmp_path, monkeypatch):
+    monkeypatch.setattr(user_settings, 'DATA_DIR', tmp_path)
+    monkeypatch.setattr(user_settings, 'KNOWN_CHATS_FILE', tmp_path / 'known_chats.json')
+    monkeypatch.setattr(user_settings, 'SEARCH_MODES_FILE', tmp_path / 'search_modes.json')
+    monkeypatch.setattr(user_settings, 'CHANNEL_SUBS_FILE', tmp_path / 'channel_subscriptions.json')
+
+    update = MagicMock()
+    update.effective_chat.id = 555
+    update.effective_user.first_name = 'Noam'
+    update.effective_user.last_name = 'R'
+    update.effective_user.username = None
+    update.callback_query = None
+    remember_from_update(update)
+    assert format_known_user_label(555) == 'Noam R'

@@ -68,45 +68,149 @@ def set_search_mode(user_id, enabled: bool):
             raise
 
 
-def _read_known_chats() -> list:
+def _empty_known_user():
+    return {
+        'username': '',
+        'first_name': '',
+        'last_name': '',
+        'last_seen': None,
+    }
+
+
+def _coerce_known_chats(data) -> dict:
+    """רשימה ישנה של IDs → מילון. מילון קיים נשאר."""
+    if isinstance(data, list):
+        return {str(item): _empty_known_user() for item in data}
+    if not isinstance(data, dict):
+        return {}
+    store = {}
+    for key, value in data.items():
+        record = _empty_known_user()
+        if isinstance(value, dict):
+            record['username'] = str(value.get('username') or '')
+            record['first_name'] = str(value.get('first_name') or '')
+            record['last_name'] = str(value.get('last_name') or '')
+            record['last_seen'] = value.get('last_seen')
+        store[str(key)] = record
+    return store
+
+
+def _clean_name(value) -> str:
+    if not isinstance(value, str):
+        return ''
+    return value.strip()
+
+
+def _profile_from_telegram(user=None, chat=None) -> dict:
+    first = ''
+    last = ''
+    username = ''
+    if user is not None:
+        first = _clean_name(getattr(user, 'first_name', None))
+        last = _clean_name(getattr(user, 'last_name', None))
+        username = _clean_name(getattr(user, 'username', None))
+    if chat is not None:
+        first = first or _clean_name(getattr(chat, 'first_name', None))
+        last = last or _clean_name(getattr(chat, 'last_name', None))
+        username = username or _clean_name(getattr(chat, 'username', None))
+        title = _clean_name(getattr(chat, 'title', None))
+        if title and not first:
+            first = title
+    return {
+        'username': username.lstrip('@'),
+        'first_name': first,
+        'last_name': last,
+    }
+
+
+def format_known_user_label(chat_id, record=None) -> str:
+    """שם לתצוגה אדמין. בלי רשומה / תקלה — רק המספר, בלי לזרוק."""
+    fallback = str(chat_id)
+    try:
+        if record is None:
+            with _chats_lock:
+                record = _read_known_chats().get(str(chat_id), {})
+        if not isinstance(record, dict):
+            record = {}
+        first = str(record.get('first_name') or '').strip()
+        last = str(record.get('last_name') or '').strip()
+        username = str(record.get('username') or '').strip().lstrip('@')
+        name = ' '.join(part for part in (first, last) if part)
+        if name and username:
+            return f'{name} (@{username})'
+        if name:
+            return name
+        if username:
+            return f'@{username}'
+        return fallback
+    except Exception:
+        return fallback
+
+
+def _read_known_chats() -> dict:
     if not KNOWN_CHATS_FILE.exists():
-        return []
+        return {}
     try:
         with open(KNOWN_CHATS_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            return [str(item) for item in data]
+            return _coerce_known_chats(json.load(f))
     except Exception as e:
         logger.warning(f"Could not read known chats file: {e}")
-    return []
+        return {}
 
 
-def _write_known_chats(chats: list):
+def _write_known_chats(store: dict):
     _ensure_data_dir()
     tmp_path = KNOWN_CHATS_FILE.with_suffix('.tmp')
     with open(tmp_path, 'w', encoding='utf-8') as f:
-        json.dump(chats, f, ensure_ascii=False, indent=2)
+        json.dump(store, f, ensure_ascii=False, indent=2)
     tmp_path.replace(KNOWN_CHATS_FILE)
 
 
-def remember_chat(chat_id):
-    """שומר chat_id כדי שאפשר יהיה לרענן תפריט פקודות אחרי ריסטארט."""
+def remember_chat(chat_id, user=None, chat=None):
+    """שומר chat_id + שם אם יש, לכל מי שדיבר עם הבוט."""
     with _chats_lock:
-        chats = _read_known_chats()
+        store = _read_known_chats()
         key = str(chat_id)
-        if key not in chats:
-            chats.append(key)
+        record = store.get(key) or _empty_known_user()
+        profile = _profile_from_telegram(user=user, chat=chat)
+        changed = key not in store
+        for field, value in profile.items():
+            if value and record.get(field) != value:
+                record[field] = value
+                changed = True
+        seen = datetime.now(timezone.utc).isoformat()
+        if record.get('last_seen') != seen:
+            record['last_seen'] = seen
+            changed = True
+        if changed:
+            store[key] = record
             try:
-                _write_known_chats(chats)
+                _write_known_chats(store)
             except Exception as e:
                 logger.warning(f"Could not save known chat {chat_id}: {e}")
+
+
+def remember_from_update(update):
+    """לוכד ID+שם מכל עדכון טלגרם (הודעה או לחיצת כפתור)."""
+    if update is None:
+        return
+    chat = getattr(update, 'effective_chat', None)
+    user = getattr(update, 'effective_user', None)
+    query = getattr(update, 'callback_query', None)
+    if chat is None and query is not None and getattr(query, 'message', None) is not None:
+        chat = query.message.chat
+    if user is None and query is not None:
+        user = getattr(query, 'from_user', None)
+    if chat is None:
+        return
+    remember_chat(chat.id, user=user, chat=chat)
 
 
 def list_known_chat_ids():
     """chat_ids שכבר דיברו עם הבוט (תפריט, חיפוש, או מעקב ערוצים)."""
     ids = set()
     with _chats_lock:
-        ids.update(_read_known_chats())
+        ids.update(_read_known_chats().keys())
     with _lock:
         ids.update(_read_search_modes().keys())
     with _subs_lock:
