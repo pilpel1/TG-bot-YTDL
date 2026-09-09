@@ -149,14 +149,12 @@ CHANNEL_WATCH_FETCH_LIMIT = _env_int('CHANNEL_WATCH_FETCH_LIMIT', 20)
 CHANNEL_WATCH_MAX_PER_USER = _env_int('CHANNEL_WATCH_MAX_PER_USER', 10)
 CHANNEL_WATCH_NOTIFIED_CAP = _env_int('CHANNEL_WATCH_NOTIFIED_CAP', 200)
 
-# אדמינים לפקודות פנימיות (/broadcast). ריק = אף אחד. לא לשים בגיט — רק ב-.env
+# אדמינים לפקודות פנימיות (/status /broadcast /users /mode). ריק = אף אחד.
+# לא לשים בגיט — רק ב-.env
 ADMIN_USER_IDS = frozenset(_env_id_list('ADMIN_USER_IDS'))
 
 # Version info
-VERSION = "0.13.0"
-CHANGELOG = """🆕 גרסה 0.13.0:
-📣 שידור הודעה לאדמין
-• /broadcast — שליחת הודעה או תמונה לכל מי שכבר דיבר עם הבוט (כולל אותך)
-• דורש אישור לפני השידור; מי שחסם את הבוט נספר ולא עוצר את השאר
-• תפריט אדמין עם פקודות ניהול נוספות
-• שם חסר מוצג כמספר, השידור לא נשבר"""
+VERSION = "0.13.1"
+CHANGELOG = """🆕 גרסה 0.13.1:
+• /status לאדמין — uptime שרת/סרוויס/Docker, קומיט שרץ, מצב תור
+• פקודות אדמין שותקות לגמרי למשתמש רגיל"""

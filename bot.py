@@ -6,6 +6,7 @@ from config import BOT_TOKEN, LOCAL_API_AVAILABLE, LOCAL_API_BASE_URL, LOCAL_API
 from bot_handlers import (
     start, ask_format, button_click, handle_thank_you, version, help_command, mode,
     stop_download, search_mode, channels_command, broadcast_command, users_command,
+    status_command,
     remember_incoming, build_bot_commands,
     refresh_all_user_command_menus,
 )
@@ -13,6 +14,7 @@ from utils import cleanup_temp_files, check_ffmpeg_on_startup
 from download_queue import DownloadQueue
 from ytdlp_updater import YtdlpUpdateManager
 from channel_watch import ChannelWatchManager
+from runtime_status import mark_runtime_start
 
 
 async def post_init(application):
@@ -87,6 +89,7 @@ async def error_handler(update: Update, context):
 
 def main():
     try:
+        mark_runtime_start()
         # ניקוי קבצים זמניים מהפעלה קודמת
         cleanup_temp_files()
         
@@ -127,7 +130,8 @@ def main():
         application.add_handler(CommandHandler('start', start))
         application.add_handler(CommandHandler('help', help_command))
         application.add_handler(CommandHandler('version', version))
-        application.add_handler(CommandHandler('mode', mode))  # ניטור פנימי — לא בתפריט
+        application.add_handler(CommandHandler('mode', mode))
+        application.add_handler(CommandHandler('status', status_command))
         application.add_handler(CommandHandler('stop', stop_download))
         application.add_handler(CommandHandler('search_mode', search_mode))
         application.add_handler(CommandHandler('channels', channels_command))

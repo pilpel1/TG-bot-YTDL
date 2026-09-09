@@ -16,6 +16,7 @@ from bot_handlers import (
     broadcast_command,
     button_click,
     mode,
+    status_command,
     users_command,
 )
 
@@ -120,6 +121,52 @@ async def test_users_command_silent_for_non_admin(mock_update, mock_context, mon
     mock_update.effective_user.id = 99
     await users_command(mock_update, mock_context)
     mock_update.message.reply_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_status_command_silent_for_non_admin(mock_update, mock_context, monkeypatch):
+    monkeypatch.setattr(config, 'ADMIN_USER_IDS', frozenset({42}))
+    mock_update.effective_user.id = 99
+    await status_command(mock_update, mock_context)
+    mock_update.message.reply_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_status_command_replies_for_admin(mock_update, mock_context, monkeypatch):
+    monkeypatch.setattr(config, 'ADMIN_USER_IDS', frozenset({42}))
+    queue = MagicMock()
+    queue.snapshot.return_value = {
+        'running': False,
+        'running_elapsed': None,
+        'waiting': 0,
+        'total': 0,
+    }
+    mock_context.bot_data['download_queue'] = queue
+    with patch('runtime_status.get_host_uptime_seconds', return_value=3661), \
+         patch('runtime_status.get_service_uptime_seconds', return_value=65), \
+         patch('runtime_status.get_git_info', return_value={
+             'hash': 'abc1234',
+             'subject': 'Add /status',
+             'dirty': False,
+         }), \
+         patch('runtime_status.is_maintenance_mode', return_value=False), \
+         patch('runtime_status.get_installed_ytdlp_version', return_value='2026.1.1'), \
+         patch('runtime_status.get_docker_api_status', return_value={
+             'found': True,
+             'running': True,
+             'uptime_seconds': 7200,
+             'status': 'running',
+             'error': None,
+         }):
+        await status_command(mock_update, mock_context)
+    mock_update.message.reply_text.assert_awaited()
+    text = mock_update.message.reply_text.call_args[0][0]
+    assert 'סטטוס' in text
+    assert 'abc1234' in text
+    assert 'תור: פנוי' in text
+    assert 'שרת: 1 שעה, 1 דקה' in text
+    assert 'סרוויס: 1 דקה' in text
+    assert 'Docker: 2 שעות' in text
 
 
 @pytest.mark.asyncio

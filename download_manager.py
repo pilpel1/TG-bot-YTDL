@@ -2,7 +2,7 @@ import os
 import yt_dlp
 import telegram
 from pathlib import Path
-from logger_setup import logger, log_download
+from logger_setup import logger, log_download, format_requester_for_log
 from user_settings import remember_chat
 from config import DOWNLOADS_DIR, MAX_FILE_SIZE, FACEBOOK_COOKIES_FILE
 from download_cache import get_cached_file, save_cached_file, delete_cached_file
@@ -370,8 +370,16 @@ async def download_with_quality(context, status_message, url, download_mode, qua
     """
     current_file = None
     thumbnail_file = None
+    requester = format_requester_for_log(
+        getattr(status_message, 'chat', None),
+        getattr(status_message, 'chat_id', None),
+    )
+    logger.info(
+        f"Download requested by {requester} mode={download_mode} url={url}"
+    )
 
     if should_cancel and should_cancel():
+        logger.info(f"Download skipped (already cancelled) for {requester}")
         return False
 
     try:
@@ -723,7 +731,10 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                             f'המגבלה המקסימלית היא {max_size_display}. נסה איכות נמוכה יותר.'
                         )
                     return False
-        
+
+        # לא למחזר את info מבדיקת הפלייליסט למעלה — אם ההורדה נכשלת
+        # נשאר מטא-דאטה ישן והלוג נראה כאילו הקובץ ירד.
+        info = None
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 # ניסיון ראשון - הורדה ישירה
@@ -941,7 +952,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     logger.info("File sent successfully")
                 
                 except telegram.error.TimedOut as e:
-                    logger.error(f"Timeout during file send: {str(e)}")
+                    logger.error(f"Timeout during file send for {requester}: {str(e)}")
                     if not is_playlist:
                         await replace_status_message(
                             status_message,
@@ -950,7 +961,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                     raise
                 
                 except Exception as e:
-                    logger.error(f"Error sending file: {str(e)}")
+                    logger.error(f"Error sending file for {requester}: {str(e)}")
                     raise
             
             else:
@@ -964,14 +975,14 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                 return False
 
     except yt_dlp.utils.DownloadCancelled:
-        logger.info(f"Download cancelled by user: {url}")
+        logger.info(f"Download cancelled by {requester}: {url}")
         if not is_playlist:
             await replace_status_message(status_message, 'ההורדה בוטלה 🛑')
         return False
 
     except Exception as e:
         error_msg = str(e)
-        logger.error(f"Error during download: {error_msg}")
+        logger.error(f"Error during download for {requester}: {error_msg}")
         
         if not is_playlist:
             if "Sign in to confirm your age" in error_msg:

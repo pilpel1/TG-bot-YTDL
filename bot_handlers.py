@@ -44,6 +44,7 @@ from channel_watch import (
     format_watch_schedule_he,
 )
 from broadcast import is_admin, list_broadcast_targets, run_broadcast
+from runtime_status import build_status_text
 from utils import (
     fetch_youtube_download_options,
     build_youtube_audio_option,
@@ -263,6 +264,7 @@ def build_bot_commands(search_mode_on: bool = False, include_admin: bool = False
     ]
     if include_admin:
         commands.extend([
+            BotCommand('status', 'סטטוס שרת, קומיט ותור (אדמין)'),
             BotCommand('broadcast', 'שידור הודעה לכל המשתמשים (אדמין)'),
             BotCommand('users', 'רשימת משתמשים (אדמין)'),
             BotCommand('mode', 'מצב שרת ומגבלת קבצים (אדמין)'),
@@ -1545,6 +1547,13 @@ def _is_admin_message(update: Update) -> bool:
     """True רק להודעת אדמין. אחרת פקודות ניהול שותקות לגמרי."""
     user = update.effective_user
     return bool(user and update.message and is_admin(user.id))
+
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/status — אדמין בלבד. uptime, קומיט שנטען בתהליך, מצב תור."""
+    if not _is_admin_message(update):
+        return
+    await update.message.reply_text(build_status_text(context))
 
 
 async def mode(update: Update, context: ContextTypes.DEFAULT_TYPE):

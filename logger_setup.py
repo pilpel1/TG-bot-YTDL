@@ -22,6 +22,49 @@ logging.getLogger('httpcore').setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
+
+def format_requester_for_log(chat=None, chat_id=None) -> str:
+    """תווית ללוגים: שם אם יש, ותמיד chat_id.
+
+    לא לשימוש בשמות קבצי היסטוריה — רק journalctl/bot.log, כולל כישלונות.
+    """
+    def as_text(value):
+        return value.strip() if isinstance(value, str) and value.strip() else ''
+
+    def as_id(value):
+        if isinstance(value, bool) or value is None:
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+
+    resolved_id = as_id(chat_id)
+    username = ''
+    display_name = ''
+    if chat is not None:
+        resolved_id = as_id(getattr(chat, 'id', None)) or resolved_id
+        username = as_text(getattr(chat, 'username', None)).lstrip('@')
+        first = as_text(getattr(chat, 'first_name', None))
+        last = as_text(getattr(chat, 'last_name', None))
+        title = as_text(getattr(chat, 'title', None))
+        display_name = ' '.join(part for part in (first, last) if part) or title
+
+    if username and display_name:
+        name = f'{display_name} (@{username})'
+    elif username:
+        name = f'@{username}'
+    else:
+        name = display_name
+
+    if name and resolved_id is not None:
+        return f'{name} (chat_id={resolved_id})'
+    if resolved_id is not None:
+        return f'chat_id={resolved_id}'
+    return name or 'unknown'
+
+
 def log_download(username: str, url: str, download_type: str, filename: str):
     """Log download to user-specific text file"""
     try:

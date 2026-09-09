@@ -3,7 +3,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Awaitable, Optional
 
-from logger_setup import logger
+from logger_setup import logger, format_requester_for_log
 
 # כל כמה שניות מתעדכנת הודעת "מיקום בתור" למי שממתין
 QUEUE_POSITION_UPDATE_INTERVAL_SECONDS = 5
@@ -87,6 +87,22 @@ class DownloadQueue:
     def job_count(self) -> int:
         return len(self._jobs)
 
+    def snapshot(self) -> dict:
+        """מצב תור לרגע הזה: האם רצה הורדה, כמה ממתינות, כמה זמן הג'וב הפעיל רץ."""
+        running_elapsed = None
+        waiting = 0
+        for job in self._jobs.values():
+            if job.started_at is not None:
+                running_elapsed = time.monotonic() - job.started_at
+            else:
+                waiting += 1
+        return {
+            'running': running_elapsed is not None,
+            'running_elapsed': running_elapsed,
+            'waiting': waiting,
+            'total': len(self._jobs),
+        }
+
     async def cancel_all(self, notify_text=None) -> int:
         """מבטל את כל הג'ובים (רץ + ממתינים). מחזיר כמה בוטלו.
 
@@ -144,7 +160,10 @@ class DownloadQueue:
             cancel_token=cancel_token or CancellationToken(),
         )
         self._jobs[job_id] = job
-
+        logger.info(
+            f"Job {job_id} queued for "
+            f"{format_requester_for_log(getattr(status_message, 'chat', None), chat_id)}"
+        )
         await self._queue.put(job_id)
 
         position = self._position_ahead(job_id)
@@ -277,10 +296,13 @@ class DownloadQueue:
             # (job.task.cancel()) לא הורג את ה-worker, רק את הג'וב הנוכחי.
             job.task = asyncio.create_task(job.coro_factory())
 
+            requester = format_requester_for_log(
+                getattr(job.status_message, 'chat', None), job.chat_id
+            )
             try:
                 await job.task
             except asyncio.CancelledError:
-                logger.info(f"Job {job_id} was cancelled")
+                logger.info(f"Job {job_id} from {requester} was cancelled")
                 # אם הביטול הזה הוא בעצם ביטול של ה-worker task עצמו (לא רק
                 # של הג'וב הבודד) - צריך להמשיך להתפשט ולסיים את הלולאה,
                 # אחרת ה-worker "בולע" את הביטול שלו ונשאר תקוע לנצח.
@@ -288,7 +310,7 @@ class DownloadQueue:
                 if current_task is not None and current_task.cancelling():
                     raise
             except Exception as e:
-                logger.error(f"Job {job_id} raised an error: {e}")
+                logger.error(f"Job {job_id} from {requester} raised an error: {e}")
             finally:
                 duration = time.monotonic() - job.started_at
                 seconds_per_unit = duration / job.weight

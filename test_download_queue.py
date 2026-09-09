@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import pytest
 import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock
@@ -6,10 +7,16 @@ from unittest.mock import AsyncMock, MagicMock
 from download_queue import DownloadQueue, CancellationToken
 
 
-def make_status_message(chat_id=111):
+def make_status_message(chat_id=111, first_name=None, last_name=None, username=None):
     message = MagicMock()
     message.chat_id = chat_id
     message.edit_text = AsyncMock()
+    message.chat = MagicMock()
+    message.chat.id = chat_id
+    message.chat.username = username
+    message.chat.first_name = first_name
+    message.chat.last_name = last_name
+    message.chat.title = None
     return message
 
 
@@ -422,6 +429,43 @@ async def test_is_idle_false_while_job_running(queue):
 
 
 @pytest.mark.asyncio
+async def test_snapshot_running_and_waiting(queue):
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+
+    async def first_job():
+        first_started.set()
+        await release_first.wait()
+
+    async def second_job():
+        pass
+
+    await queue.enqueue(chat_id=1, status_message=make_status_message(1), coro_factory=first_job)
+    await asyncio.wait_for(first_started.wait(), timeout=1)
+    snap = queue.snapshot()
+    assert snap['running'] is True
+    assert snap['waiting'] == 0
+    assert snap['total'] == 1
+    assert snap['running_elapsed'] >= 0
+
+    await queue.enqueue(chat_id=2, status_message=make_status_message(2), coro_factory=second_job)
+    snap = queue.snapshot()
+    assert snap['running'] is True
+    assert snap['waiting'] == 1
+    assert snap['total'] == 2
+
+    release_first.set()
+    for _ in range(50):
+        if queue.is_idle():
+            break
+        await asyncio.sleep(0.02)
+    idle = queue.snapshot()
+    assert idle['running'] is False
+    assert idle['waiting'] == 0
+    assert idle['total'] == 0
+
+
+@pytest.mark.asyncio
 async def test_cancel_all_cancels_running_and_waiting_jobs(queue):
     first_started = asyncio.Event()
     release_first = asyncio.Event()
@@ -449,3 +493,30 @@ async def test_cancel_all_cancels_running_and_waiting_jobs(queue):
     release_first.set()
     await asyncio.sleep(0.05)
     assert not second_ran.is_set()
+
+
+@pytest.mark.asyncio
+async def test_failed_job_logs_requester(queue, caplog):
+    caplog.set_level(logging.INFO)
+    finished = asyncio.Event()
+
+    async def boom():
+        finished.set()
+        raise RuntimeError('File not downloaded')
+
+    status_message = make_status_message(
+        chat_id=770847605, first_name='Dana', last_name='Cohen'
+    )
+    await queue.enqueue(
+        chat_id=770847605, status_message=status_message, coro_factory=boom
+    )
+    await asyncio.wait_for(finished.wait(), timeout=1)
+    for _ in range(50):
+        if queue.is_idle():
+            break
+        await asyncio.sleep(0.01)
+
+    combined = caplog.text
+    assert 'Dana Cohen (chat_id=770847605)' in combined
+    assert 'queued for Dana Cohen (chat_id=770847605)' in combined
+    assert 'from Dana Cohen (chat_id=770847605) raised an error: File not downloaded' in combined

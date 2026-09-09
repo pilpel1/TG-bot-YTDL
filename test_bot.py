@@ -1,3 +1,4 @@
+import logging
 import pytest
 import yt_dlp
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -317,8 +318,8 @@ def test_build_bot_commands_reflects_search_mode_status():
     assert not any(c.command == 'broadcast' for c in off_commands)
     admin_commands = build_bot_commands(False, include_admin=True)
     admin_names = [c.command for c in admin_commands]
-    assert admin_names[-3:] == ['broadcast', 'users', 'mode']
-    assert all('(אדמין)' in c.description for c in admin_commands if c.command in ('broadcast', 'users', 'mode'))
+    assert admin_names[-4:] == ['status', 'broadcast', 'users', 'mode']
+    assert all('(אדמין)' in c.description for c in admin_commands if c.command in ('status', 'broadcast', 'users', 'mode'))
 
 
 @pytest.mark.asyncio
@@ -878,11 +879,16 @@ def test_cache_quality_token_differs_between_height_caps():
     assert build_quality_cache_token('video', high) != build_quality_cache_token('video', low)
 
 @pytest.mark.asyncio
-async def test_download_with_quality_returns_immediately_when_already_cancelled(mock_context):
+async def test_download_with_quality_returns_immediately_when_already_cancelled(mock_context, caplog):
     """אם בוטל עוד לפני שהג'וב באמת התחיל לרוץ (למשל בזמן שהיה בתור) -
     אין טעם לפתוח בכלל חיבור ל-yt-dlp."""
+    caplog.set_level(logging.INFO)
     status_message = MagicMock()
     status_message.edit_text = AsyncMock()
+    status_message.chat_id = 42
+    status_message.chat = MagicMock(
+        id=42, username='alice', first_name='Alice', last_name=None, title=None
+    )
 
     result = await download_with_quality(
         mock_context, status_message, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
@@ -892,6 +898,8 @@ async def test_download_with_quality_returns_immediately_when_already_cancelled(
 
     assert result is False
     status_message.edit_text.assert_not_called()
+    assert 'Download requested by Alice (@alice) (chat_id=42)' in caplog.text
+    assert 'Download skipped (already cancelled) for Alice (@alice) (chat_id=42)' in caplog.text
 
 # Stop Command Tests
 @pytest.mark.asyncio
