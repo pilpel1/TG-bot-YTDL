@@ -143,25 +143,27 @@ def get_docker_api_status(container_name: str = DOCKER_API_CONTAINER) -> dict:
 
 
 def format_docker_line(docker_status: dict | None) -> str | None:
+    """שורה אחת ל-/status. מתחילה בעברית כדי שטלגרם לא יהפוך RTL."""
     if not docker_status:
         return None
+    prefix = 'ה-Docker'
     err = docker_status.get('error')
     if err == 'no_docker':
-        return 'Docker: לא מותקן'
+        return f'{prefix}: לא מותקן'
     if err == 'permission':
-        return 'Docker: אין הרשאה'
+        return f'{prefix}: אין הרשאה'
     if err == 'timeout':
-        return 'Docker: אין תשובה'
+        return f'{prefix}: אין תשובה'
     if err == 'daemon':
-        return 'Docker: לא זמין'
+        return f'{prefix}: לא זמין'
     if err == 'failed':
-        return 'Docker: לא זמין'
+        return f'{prefix}: לא זמין'
     if err == 'not_found' or not docker_status.get('found'):
-        return 'Docker: אין קונטיינר'
+        return f'{prefix}: אין קונטיינר'
     if docker_status.get('running'):
-        return f'Docker: {format_duration_he(docker_status.get("uptime_seconds"))}'
+        return f'{prefix}: {format_duration_he(docker_status.get("uptime_seconds"))}'
     status = docker_status.get('status') or 'לא רץ'
-    return f'Docker: לא רץ ({status})'
+    return f'{prefix}: לא רץ ({status})'
 
 
 def read_git_info(repo_root: Path | None = None) -> dict:

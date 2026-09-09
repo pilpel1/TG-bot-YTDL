@@ -79,20 +79,20 @@ def test_format_status_includes_docker_uptime():
             'error': None,
         },
     )
-    assert 'Docker: 1 שעה, 1 דקה' in text
+    assert 'ה-Docker: 1 שעה, 1 דקה' in text
 
 
 def test_format_docker_line_states():
     assert format_docker_line(None) is None
-    assert format_docker_line({'error': 'no_docker'}) == 'Docker: לא מותקן'
-    assert format_docker_line({'error': 'permission'}) == 'Docker: אין הרשאה'
-    assert format_docker_line({'error': 'not_found', 'found': False}) == 'Docker: אין קונטיינר'
+    assert format_docker_line({'error': 'no_docker'}) == 'ה-Docker: לא מותקן'
+    assert format_docker_line({'error': 'permission'}) == 'ה-Docker: אין הרשאה'
+    assert format_docker_line({'error': 'not_found', 'found': False}) == 'ה-Docker: אין קונטיינר'
     assert format_docker_line({
         'found': True,
         'running': False,
         'status': 'exited',
         'error': None,
-    }) == 'Docker: לא רץ (exited)'
+    }) == 'ה-Docker: לא רץ (exited)'
 
 
 def test_parse_docker_started_at_rfc3339():
