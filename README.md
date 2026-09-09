@@ -21,6 +21,9 @@
 - Python 3.8 ומעלה
 - FFmpeg (מומלץ מאוד - ללא זה חלק מההורדות עלולות להיכשל)
 
+**מומלץ בשרת Linux (אופציונלי):**
+- Deno — yt-dlp משתמש בו לפיענוח יוטיוב. הבוט **רץ בלי זה**. בלי Deno חלק מהורדות היוטיוב (בעיקר וידאו) עלולות להיכשל, ותופיע אזהרה בלוג.
+
 **למצב מתקדם (אופציונלי - רק לקבצים מעל 50MB):**
 - WSL2 (ל-Windows)
 - Docker (לשרת Local Bot API)
@@ -74,10 +77,33 @@ brew install ffmpeg
 ffmpeg -version
 ```
 
-5. צור קובץ `.env`:
+5. **Deno (אופציונלי, מומלץ לפרודקשן יוטיוב):**
+
+הקוד לא בודק ולא דורש Deno. אם הוא מותקן — yt-dlp מוצא אותו לבד (ברירת מחדל). בלי זה הבוט עובד, אבל יוטיוב בלי מנוע JS מחביא פורמטים: אזהרת `No supported JavaScript runtime`, וכשלונות בעיקר בוידאו. לא מאיץ הורדות.
+
+אם מתקינים — **כאותו יוזר שמריץ את הבוט** (לא root):
+
+```bash
+# מי מריץ את הסרוויס:
+systemctl show -p User --value tg-bot-ytdl
+
+curl -fsSL https://deno.land/install.sh | sh
+source ~/.bashrc
+deno --version
+```
+
+אם `deno: command not found` אחרי ההתקנה — רק ה-PATH של החלון הנוכחי לא עודכן. הקובץ כן שם:
+
+```bash
+"$HOME/.deno/bin/deno" --version
+```
+
+systemd **לא** קורא `.bashrc`. `scripts/linux/run_bot_service.sh` מוסיף את `~/.deno/bin` ל-PATH **רק אם התיקייה קיימת**. אחרי התקנה חדשה: ריסטארט לבוט.
+
+6. צור קובץ `.env`:
    - העתק את הקובץ `.env.example` ל-`.env`
    - הכנס את הטוקן של הבוט שלך (ראה הוראות בהמשך)
-   - אם תרצה מצב מתקדם (2GB) - הוסף גם API credentials
+   - אם תרצה מצב מתקדם (2GB) — הוסף גם API credentials
 
 ### 🤖 יצירת בוט טלגרם
 
@@ -213,7 +239,8 @@ scripts/linux/update_ytdlp.sh
    YTDLP_UPDATE_MAX_WAIT_HOURS=4
    YTDLP_UPDATE_TIMEZONE=Asia/Jerusalem
    ```
-3. התקן את יחידות systemd (כותב נתיב+יוזר מקומיים ל-`/etc`, לא לגיט):
+3. התקן יחידות systemd. (אופציונלי, מומלץ: Deno כיוזר של הסרוויס — ראה שלב 5 למעלה.)
+   התבניות בגיט הן ב-`deploy/systemd/`. הסקריפט מעתיק אותן ל-`/etc` עם הנתיב והיוזר של המכונה הזו — אל תעתיק ידנית ואל תשבור נתיב אישי בגיט.
 
 ```bash
 # מתוך תיקיית הפרויקט — בלי להדליק עדיין, אם הבוט הישן עדיין רץ
@@ -223,6 +250,17 @@ sudo bash scripts/linux/install_systemd.sh
 sudo systemctl enable --now telegram-bot-api.service
 sudo systemctl enable --now tg-bot-ytdl.service
 ```
+
+**אחרי `git pull` שנוגע ב-`deploy/systemd/`:** ריסטארט לבד לא מספיק. `/etc/systemd/system/` הוא עותק, לא הקובץ בגיט. חייבים להעתיק מחדש:
+
+```bash
+cd ~/TG-bot-YTDL
+bash scripts/linux/update_bot.sh
+sudo bash scripts/linux/install_systemd.sh
+sudo systemctl restart tg-bot-ytdl
+```
+
+את `telegram-bot-api` בדרך כלל **לא** מרסטארטים כשמעדכנים רק את הבוט.
 
 פקודות שימושיות:
 

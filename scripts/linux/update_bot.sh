@@ -59,7 +59,9 @@ fi
 if systemctl list-unit-files tg-bot-ytdl.service >/dev/null 2>&1; then
     echo
     echo "[>>] systemd unit tg-bot-ytdl is installed."
-    echo "    New code is on disk; restart to load it:"
+    echo "    New Python code:  sudo systemctl restart tg-bot-ytdl"
+    echo "    If deploy/systemd/ changed, copy units first:"
+    echo "    sudo bash scripts/linux/install_systemd.sh"
     echo "    sudo systemctl restart tg-bot-ytdl"
 fi
 

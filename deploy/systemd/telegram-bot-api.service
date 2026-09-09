@@ -8,6 +8,8 @@ Description=Telegram Local Bot API Server (2GB uploads)
 After=network-online.target docker.service
 Wants=network-online.target
 Requires=docker.service
+StartLimitBurst=5
+StartLimitIntervalSec=120
 
 [Service]
 Type=simple
@@ -16,8 +18,6 @@ ExecStart=/bin/bash __PROJECT_DIR__/scripts/linux/run_local_api_service.sh
 Restart=always
 RestartSec=5
 TimeoutStopSec=30
-StartLimitBurst=5
-StartLimitIntervalSec=120
 
 [Install]
 WantedBy=multi-user.target

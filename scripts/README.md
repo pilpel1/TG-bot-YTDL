@@ -30,8 +30,8 @@ scripts/
 ### סקריפטים עיקריים:
 - **`run_bot_advanced_2GB.sh`** - מסלול ה-2GB הרשמי: מרים Local API ב-WSL, ממתין ל-readiness, ואז מפעיל את הבוט
 - **`run_bot_simple_50MB.sh`** - הפעלת בוט פשוטה (תמיד 50MB)
-- **`install_systemd.sh`** - מזהה נתיב פרויקט + יוזר, וכותב את יחידות systemd ל-`/etc` (לא לשמור נתיב אישי בגיט)
-- **`run_bot_service.sh`** - הפעלת פרודקשן ל-systemd (ממתין ל-Local API, מעדכן yt-dlp אם יש סימון, מריץ את הבוט)
+- **`install_systemd.sh`** - מזהה נתיב פרויקט + יוזר, וכותב את יחידות systemd ל-`/etc` (לא לשמור נתיב אישי בגיט). אחרי שינוי ב-`deploy/systemd/` חובה להריץ שוב — `restart` לא מעתיק את הקבצים
+- **`run_bot_service.sh`** - הפעלת פרודקשן ל-systemd (ממתין ל-Local API, מעדכן yt-dlp אם יש סימון, ואם קיים `~/.deno/bin` מוסיף אותו ל-PATH, מריץ את הבוט)
 - **`run_local_api_service.sh`** - Local API ב-foreground ל-systemd (עם volume קבוע)
 - **`update_bot.sh`** - `git pull` + תלויות מ-`requirements.txt`; גיבוי `.env` + צילום `logs/` ל-`backup/logs`; לא דורס `data/` / לוגים חיים / cookies
 - **`update_ytdlp.sh`** - עדכון yt-dlp

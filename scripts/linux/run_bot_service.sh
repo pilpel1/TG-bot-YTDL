@@ -77,6 +77,12 @@ else
     log "No pending yt-dlp update flag; starting bot"
 fi
 
+# yt-dlp looks for `deno` in PATH (YouTube JS / nsig). The official installer
+# puts it in ~/.deno/bin, which systemd's short PATH usually does not include.
+if [ -n "${HOME:-}" ] && [ -d "$HOME/.deno/bin" ]; then
+    export PATH="$HOME/.deno/bin:$PATH"
+fi
+
 # shellcheck disable=SC1091
 source venv/bin/activate
 exec python bot.py
