@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 from runtime_status import (
+    RLM,
     format_docker_line,
     format_duration_he,
     format_status_message,
@@ -45,6 +46,22 @@ def test_format_status_idle_and_git():
     assert 'לא נקי' not in text
 
 
+def test_format_status_keeps_full_commit_message():
+    message = (
+        'Update Docker status messages to include Hebrew prefix for consistency.\n'
+        'Modified the format_docker_line helper.'
+    )
+    text = format_status_message(
+        host_uptime=10,
+        service_uptime=10,
+        git_info={'hash': 'abc1234', 'subject': message, 'dirty': False},
+        version='0.13.1',
+        queue_snapshot={'running': False, 'running_elapsed': None, 'waiting': 0},
+    )
+    assert message in text
+    assert 'Modif...' not in text
+
+
 def test_format_status_queue_and_dirty_and_maintenance():
     text = format_status_message(
         host_uptime=10,
@@ -79,20 +96,20 @@ def test_format_status_includes_docker_uptime():
             'error': None,
         },
     )
-    assert 'ה-Docker: 1 שעה, 1 דקה' in text
+    assert f'ה-Docker:{RLM} 1 שעה, 1 דקה' in text
 
 
 def test_format_docker_line_states():
     assert format_docker_line(None) is None
-    assert format_docker_line({'error': 'no_docker'}) == 'ה-Docker: לא מותקן'
-    assert format_docker_line({'error': 'permission'}) == 'ה-Docker: אין הרשאה'
-    assert format_docker_line({'error': 'not_found', 'found': False}) == 'ה-Docker: אין קונטיינר'
+    assert format_docker_line({'error': 'no_docker'}) == f'ה-Docker:{RLM} לא מותקן'
+    assert format_docker_line({'error': 'permission'}) == f'ה-Docker:{RLM} אין הרשאה'
+    assert format_docker_line({'error': 'not_found', 'found': False}) == f'ה-Docker:{RLM} אין קונטיינר'
     assert format_docker_line({
         'found': True,
         'running': False,
         'status': 'exited',
         'error': None,
-    }) == 'ה-Docker: לא רץ (exited)'
+    }) == f'ה-Docker:{RLM} לא רץ (exited)'
 
 
 def test_parse_docker_started_at_rfc3339():

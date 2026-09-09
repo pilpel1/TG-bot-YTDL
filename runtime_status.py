@@ -12,6 +12,8 @@ from logger_setup import logger
 from ytdlp_updater import get_installed_ytdlp_version, is_maintenance_mode
 
 DOCKER_API_CONTAINER = 'telegram-bot-api'
+# אחרי תו לטיני, ספרה נדבקת ל-LTR. RLM מחזיר את המספר לכיוון העברי.
+RLM = '\u200f'
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -142,28 +144,32 @@ def get_docker_api_status(container_name: str = DOCKER_API_CONTAINER) -> dict:
     }
 
 
+def _docker_line(rest: str) -> str:
+    """'ה-Docker:' + RLM כדי שהמספר אחרי הלעז יישאר ב-RTL."""
+    return f'ה-Docker:{RLM} {rest}'
+
+
 def format_docker_line(docker_status: dict | None) -> str | None:
     """שורה אחת ל-/status. מתחילה בעברית כדי שטלגרם לא יהפוך RTL."""
     if not docker_status:
         return None
-    prefix = 'ה-Docker'
     err = docker_status.get('error')
     if err == 'no_docker':
-        return f'{prefix}: לא מותקן'
+        return _docker_line('לא מותקן')
     if err == 'permission':
-        return f'{prefix}: אין הרשאה'
+        return _docker_line('אין הרשאה')
     if err == 'timeout':
-        return f'{prefix}: אין תשובה'
+        return _docker_line('אין תשובה')
     if err == 'daemon':
-        return f'{prefix}: לא זמין'
+        return _docker_line('לא זמין')
     if err == 'failed':
-        return f'{prefix}: לא זמין'
+        return _docker_line('לא זמין')
     if err == 'not_found' or not docker_status.get('found'):
-        return f'{prefix}: אין קונטיינר'
+        return _docker_line('אין קונטיינר')
     if docker_status.get('running'):
-        return f'{prefix}: {format_duration_he(docker_status.get("uptime_seconds"))}'
+        return _docker_line(format_duration_he(docker_status.get('uptime_seconds')))
     status = docker_status.get('status') or 'לא רץ'
-    return f'{prefix}: לא רץ ({status})'
+    return _docker_line(f'לא רץ ({status})')
 
 
 def read_git_info(repo_root: Path | None = None) -> dict:
@@ -173,7 +179,7 @@ def read_git_info(repo_root: Path | None = None) -> dict:
     if not short:
         return info
     info['hash'] = short
-    info['subject'] = _git_output(['log', '-1', '--format=%s'], root)
+    info['subject'] = _git_output(['log', '-1', '--format=%B'], root)
     dirty = _git_output(['status', '--porcelain'], root)
     info['dirty'] = bool(dirty)
     return info
@@ -263,8 +269,6 @@ def format_status_message(
 ) -> str:
     git_hash = git_info.get('hash')
     subject = (git_info.get('subject') or '').strip()
-    if len(subject) > 80:
-        subject = subject[:77] + '...'
 
     lines = [
         '📊 סטטוס',

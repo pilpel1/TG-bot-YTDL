@@ -166,7 +166,8 @@ async def test_status_command_replies_for_admin(mock_update, mock_context, monke
     assert 'תור: פנוי' in text
     assert 'שרת: 1 שעה, 1 דקה' in text
     assert 'סרוויס: 1 דקה' in text
-    assert 'ה-Docker: 2 שעות' in text
+    assert 'ה-Docker:' in text
+    assert '2 שעות' in text
 
 
 @pytest.mark.asyncio
