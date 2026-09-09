@@ -15,7 +15,6 @@ from bot_handlers import (
     ask_format,
     broadcast_command,
     button_click,
-    mode,
     status_command,
     users_command,
 )
@@ -96,23 +95,6 @@ async def test_broadcast_command_silent_for_non_admin(mock_update, mock_context,
     mock_update.effective_user.id = 99
     await broadcast_command(mock_update, mock_context)
     mock_update.message.reply_text.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_mode_command_silent_for_non_admin(mock_update, mock_context, monkeypatch):
-    monkeypatch.setattr(config, 'ADMIN_USER_IDS', frozenset({42}))
-    mock_update.effective_user.id = 99
-    await mode(mock_update, mock_context)
-    mock_update.message.reply_text.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_mode_command_replies_for_admin(mock_update, mock_context, monkeypatch):
-    monkeypatch.setattr(config, 'ADMIN_USER_IDS', frozenset({42}))
-    await mode(mock_update, mock_context)
-    mock_update.message.reply_text.assert_awaited()
-    text = mock_update.message.reply_text.call_args[0][0]
-    assert 'מצב הבוט הנוכחי' in text
 
 
 @pytest.mark.asyncio

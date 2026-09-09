@@ -267,7 +267,6 @@ def build_bot_commands(search_mode_on: bool = False, include_admin: bool = False
             BotCommand('status', 'סטטוס שרת, קומיט ותור (אדמין)'),
             BotCommand('broadcast', 'שידור הודעה לכל המשתמשים (אדמין)'),
             BotCommand('users', 'רשימת משתמשים (אדמין)'),
-            BotCommand('mode', 'מצב שרת ומגבלת קבצים (אדמין)'),
         ])
     return commands
 
@@ -1554,37 +1553,6 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_admin_message(update):
         return
     await update.message.reply_text(build_status_text(context))
-
-
-async def mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ניטור פנימי: מצב שרת / מגבלת קבצים. אדמין בלבד, אחרת שתיקה."""
-    if not _is_admin_message(update):
-        return
-
-    file_size_gb = MAX_FILE_SIZE / (1024 * 1024 * 1024)
-    file_size_mb = MAX_FILE_SIZE / (1024 * 1024)
-
-    if file_size_gb >= 1:
-        mode_text = f"🚀 **מצב מתקדם** - מגבלת קבצים: {file_size_gb:.1f}GB"
-        server_text = "✅ Local API Server זמין"
-    else:
-        mode_text = f"📱 **מצב פשוט** - מגבלת קבצים: {file_size_mb:.0f}MB"
-        server_text = "❌ Local API Server לא זמין"
-
-    message = f"""🤖 **מצב הבוט הנוכחי:**
-
-{mode_text}
-{server_text}
-
-ℹ️ **הסבר מצבים:**
-• **מצב פשוט (50MB)**: תמיד עובד עם Telegram API הרגיל
-• **מצב חכם (2GB/50MB)**: מנסה Local Server, אם נכשל עובר ל-50MB
-
-💡 **אפשרויות הפעלה:**
-• `run_bot_simple_50MB` - תמיד 50MB
-• `run_bot_advanced_2GB` - חכם עם auto-fallback"""
-
-    await update.message.reply_text(message, parse_mode='Markdown')
 
 
 def _clear_broadcast_state(context):

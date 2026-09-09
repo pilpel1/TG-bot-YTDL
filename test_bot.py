@@ -318,8 +318,8 @@ def test_build_bot_commands_reflects_search_mode_status():
     assert not any(c.command == 'broadcast' for c in off_commands)
     admin_commands = build_bot_commands(False, include_admin=True)
     admin_names = [c.command for c in admin_commands]
-    assert admin_names[-4:] == ['status', 'broadcast', 'users', 'mode']
-    assert all('(אדמין)' in c.description for c in admin_commands if c.command in ('status', 'broadcast', 'users', 'mode'))
+    assert admin_names[-3:] == ['status', 'broadcast', 'users']
+    assert all('(אדמין)' in c.description for c in admin_commands if c.command in ('status', 'broadcast', 'users'))
 
 
 @pytest.mark.asyncio
