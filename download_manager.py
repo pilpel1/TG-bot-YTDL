@@ -23,14 +23,22 @@ import requests
 UPLOAD_TIMEOUT_SECONDS = 600
 
 async def safe_edit_message(message, text):
-    """עדכון הודעה עם טיפול בשגיאות"""
+    """עדכון הודעה עם טיפול בשגיאות.
+
+    הודעה שנמחקה כבר (למשל אחרי אודיו במשלוח אודיו+וידאו) לא מפילה את ההורדה
+    ולא שולחת 'משהו השתבש' למשתמש.
+    """
     try:
         await message.edit_text(text)
+        return True
     except telegram.error.BadRequest as e:
-        if "Message is not modified" in str(e):
-            pass
-        else:
-            raise
+        err = str(e).lower()
+        if 'message is not modified' in err:
+            return True
+        if 'message to edit not found' in err or "message can't be edited" in err:
+            logger.warning(f"Could not edit status message: {e}")
+            return False
+        raise
 
 async def safe_send_message(message, text):
     """שליחת הודעה עם טיפול בשגיאות"""
@@ -75,7 +83,7 @@ def extract_max_height_from_format(format_spec):
 
 
 async def try_send_cached_media(status_message, context, cached_entry, quality, download_mode,
-                                 is_playlist, quiet_complete):
+                                 is_playlist, quiet_complete, delete_status=True):
     """מנסה לשלוח קובץ ישירות לפי file_id שמור, בלי להוריד כלום.
 
     מחזיר True בהצלחה. False אם ה-file_id כבר לא תקף (למשל טלגרם מחק את
@@ -113,7 +121,8 @@ async def try_send_cached_media(status_message, context, cached_entry, quality, 
                 chat_id=status_message.chat_id,
                 text=f'הנה הקובץ שלך! (מהמטמון ⚡){quality_msg} 🎉'
             )
-        await safe_delete_message(status_message)
+        if delete_status:
+            await safe_delete_message(status_message)
         context.user_data.pop('current_quality_index', None)
 
     logger.info("Sent cached file_id instead of re-downloading")
@@ -368,10 +377,12 @@ async def download_playlist(context, status_message, url, download_mode, quality
 
 async def download_with_quality(context, status_message, url, download_mode, quality, quality_levels,
                                  is_playlist=False, playlist_limit=None, should_cancel=None,
-                                 quiet_complete=False):
+                                 quiet_complete=False, delete_status=True):
     """הורדת קובץ באיכות ספציפית.
 
     quiet_complete: בלי הודעת "הנה הקובץ שלך" (מעקב ערוצים כבר שלח כותרת).
+    delete_status: מוחק את הודעת הסטטוס אחרי שליחה. False כשיש עוד מוד אחרי
+    (אודיו ואז וידאו) — אחרת המוד הבא נופל על Message to edit not found.
     """
     current_file = None
     thumbnail_file = None
@@ -428,7 +439,7 @@ async def download_with_quality(context, status_message, url, download_mode, qua
 
             if await try_send_cached_media(
                 status_message, context, cached_entry, quality, download_mode,
-                is_playlist, quiet_complete
+                is_playlist, quiet_complete, delete_status=delete_status
             ):
                 log_download(
                     username=get_user_identifier(status_message.chat),
@@ -977,7 +988,8 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                 chat_id=status_message.chat_id,
                                 text=f'הנה הקובץ שלך!{quality_msg} 🎉'
                             )
-                        await safe_delete_message(status_message)
+                        if delete_status:
+                            await safe_delete_message(status_message)
                         context.user_data.pop('current_quality_index', None)
                     
                     logger.info("File sent successfully")

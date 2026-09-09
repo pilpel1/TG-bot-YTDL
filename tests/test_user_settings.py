@@ -81,6 +81,25 @@ def test_channel_sub_max_limit(tmp_path, monkeypatch):
     assert error == 'limit'
 
 
+def test_update_channel_sub_keeps_seen_ids_when_trimming_notified(tmp_path, monkeypatch):
+    _subs_tmp(tmp_path, monkeypatch)
+    monkeypatch.setattr(user_settings, 'CHANNEL_WATCH_NOTIFIED_CAP', 3)
+    add_channel_sub(1, {
+        **_sample_sub(),
+        'notified_video_ids': ['a', 'b', 'c', 'd'],
+        'sources_state': {
+            'videos': {
+                'last_seen_video_id': 'a',
+                'seen_video_ids': ['a', 'z'],
+            }
+        },
+    })
+    updated = update_channel_sub(1, 0, notified_video_ids=['a', 'b', 'c', 'd'])
+    assert 'd' in updated['notified_video_ids']
+    assert 'a' in updated['notified_video_ids']
+    assert 'z' in updated['notified_video_ids']
+
+
 def test_channel_watch_last_run_and_iter(tmp_path, monkeypatch):
     _subs_tmp(tmp_path, monkeypatch)
     assert get_channel_watch_last_run() is None

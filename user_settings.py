@@ -264,6 +264,52 @@ def normalize_delivery_list(delivery):
     return cleaned or ['audio']
 
 
+def _empty_source_state():
+    return {
+        'last_seen_video_id': None,
+        'last_seen_title': None,
+        'seen_video_ids': [],
+    }
+
+
+def _normalize_source_state(src) -> dict:
+    if not isinstance(src, dict):
+        return _empty_source_state()
+    normalized = dict(src)
+    normalized.setdefault('last_seen_video_id', None)
+    normalized.setdefault('last_seen_title', None)
+    seen = normalized.get('seen_video_ids')
+    if not isinstance(seen, list):
+        normalized['seen_video_ids'] = []
+    return normalized
+
+
+def _protected_video_ids(sub: dict) -> set:
+    """ID-ים מהחלון האחרון — אסור שייחתכו ב-cap של notified."""
+    protected = set()
+    for src in (sub.get('sources_state') or {}).values():
+        if not isinstance(src, dict):
+            continue
+        for video_id in src.get('seen_video_ids') or []:
+            if video_id:
+                protected.add(video_id)
+    return protected
+
+
+def _trim_notified_video_ids(sub: dict):
+    notified = list(sub.get('notified_video_ids') or [])
+    if len(notified) <= CHANNEL_WATCH_NOTIFIED_CAP:
+        return
+    protected = _protected_video_ids(sub)
+    trimmed = notified[-CHANNEL_WATCH_NOTIFIED_CAP:]
+    have = set(trimmed)
+    for video_id in protected:
+        if video_id not in have:
+            trimmed.append(video_id)
+            have.add(video_id)
+    sub['notified_video_ids'] = trimmed
+
+
 def _normalize_sub(sub: dict) -> dict:
     normalized = deepcopy(sub)
     normalized['sources'] = normalize_source_list(normalized.get('sources'))
@@ -278,10 +324,7 @@ def _normalize_sub(sub: dict) -> dict:
     if not isinstance(sources_state, dict):
         sources_state = {}
     for source in VALID_SOURCES:
-        sources_state.setdefault(source, {
-            'last_seen_video_id': None,
-            'last_seen_title': None,
-        })
+        sources_state[source] = _normalize_source_state(sources_state.get(source))
     normalized['sources_state'] = sources_state
     return normalized
 
@@ -346,9 +389,7 @@ def update_channel_sub(user_id, index: int, **fields):
             return None
         current[index].update(fields)
         current[index] = _normalize_sub(current[index])
-        notified = current[index].get('notified_video_ids') or []
-        if len(notified) > CHANNEL_WATCH_NOTIFIED_CAP:
-            current[index]['notified_video_ids'] = notified[-CHANNEL_WATCH_NOTIFIED_CAP:]
+        _trim_notified_video_ids(current[index])
         store['users'][key] = current
         _write_subs_store(store)
         return current[index]

@@ -193,3 +193,28 @@ async def test_successful_download_saves_file_id_to_cache(tmp_path, monkeypatch)
     cached = download_cache.get_cached_file(URL, 'audio', AUDIO_TOKEN)
     assert cached['file_id'] == 'NEW_FILE_ID'
     assert cached['title'] == 'Never Gonna Give You Up'
+
+
+@pytest.mark.asyncio
+async def test_cache_hit_keeps_status_when_delete_status_false():
+    download_cache.save_cached_file(URL, 'audio', AUDIO_TOKEN, 'CACHED_FILE_ID', title='Cached Song')
+    status_message, bot = make_status_message()
+    context = make_context()
+
+    result = await download_manager.download_with_quality(
+        context, status_message, URL, 'audio', AUDIO_QUALITY, None,
+        quiet_complete=True, delete_status=False,
+    )
+
+    assert result is None
+    bot.send_audio.assert_awaited_once()
+    status_message.delete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_safe_edit_message_swallows_missing_status():
+    message = MagicMock()
+    message.edit_text = AsyncMock(
+        side_effect=download_manager.telegram.error.BadRequest('Message to edit not found')
+    )
+    assert await download_manager.safe_edit_message(message, 'מוריד...') is False

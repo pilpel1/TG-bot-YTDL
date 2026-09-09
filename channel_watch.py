@@ -43,6 +43,8 @@ YOUTUBE_HOSTS = {
 }
 
 FIXED_VIDEO_QUALITY = YOUTUBE_QUALITY_LEVELS[1]
+CHANNEL_WATCH_RETRY_SECONDS = 60
+YOUTUBE_VIDEO_ID_RE = re.compile(r'^[A-Za-z0-9_-]{11}$')
 
 
 def get_watch_timezone():
@@ -222,7 +224,11 @@ def is_youtube_video_url(url: str) -> bool:
 
 
 def source_tab_url(channel_url: str, source_key: str) -> str:
-    return f"{channel_url.rstrip('/')}/{source_key}"
+    """טאב הערוץ. לסרטונים כופים Latest (sort=dd) כדי לא לקבל Popular."""
+    base = f"{channel_url.rstrip('/')}/{source_key}"
+    if source_key == 'videos':
+        return f'{base}?view=0&sort=dd'
+    return base
 
 
 def _ydl_flat_opts():
@@ -233,6 +239,60 @@ def _ydl_flat_opts():
         'skip_download': True,
         'socket_timeout': 30,
     }
+
+
+def _iter_playlist_items(items):
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        nested = item.get('entries')
+        if nested:
+            yield from _iter_playlist_items(nested)
+            continue
+        yield item
+
+
+def _video_id_from_item(item: dict):
+    """רק ID של סרטון יוטיוב (11 תווים). פלייליסט/טאב נזרקים."""
+    candidate = str(item.get('id') or '').strip()
+    if YOUTUBE_VIDEO_ID_RE.fullmatch(candidate):
+        return candidate
+    raw_url = item.get('url') or item.get('webpage_url') or ''
+    if not raw_url:
+        return None
+    if not str(raw_url).startswith('http'):
+        if YOUTUBE_VIDEO_ID_RE.fullmatch(str(raw_url).strip()):
+            return str(raw_url).strip()
+        raw_url = f'https://www.youtube.com/watch?v={raw_url}'
+    try:
+        parsed = urlparse(raw_url)
+        query = parse_qs(parsed.query)
+        for value in query.get('v') or []:
+            if YOUTUBE_VIDEO_ID_RE.fullmatch(value):
+                return value
+        parts = [part for part in (parsed.path or '').split('/') if part]
+        if parts and YOUTUBE_VIDEO_ID_RE.fullmatch(parts[-1]):
+            return parts[-1]
+    except Exception:
+        return None
+    return None
+
+
+def _empty_source_state():
+    return {
+        'last_seen_video_id': None,
+        'last_seen_title': None,
+        'seen_video_ids': [],
+    }
+
+
+def _snapshot_source(src_state: dict, entries):
+    ids = [entry['video_id'] for entry in entries]
+    src_state['seen_video_ids'] = ids
+    if entries:
+        src_state['last_seen_video_id'] = entries[0]['video_id']
+        src_state['last_seen_title'] = entries[0]['title']
+    return ids
 
 
 def resolve_channel(url: str) -> dict:
@@ -272,6 +332,8 @@ def fetch_source_entries(channel_url: str, source_key: str, limit: int = None):
     limit = limit or CHANNEL_WATCH_FETCH_LIMIT
     tab_url = source_tab_url(channel_url, source_key)
     opts = _ydl_flat_opts()
+    opts['extract_flat'] = 'in_playlist'
+    opts['ignoreerrors'] = True
     opts['playlistend'] = limit
     with yt_dlp.YoutubeDL(opts) as ydl:
         data = ydl.extract_info(tab_url, download=False)
@@ -279,14 +341,12 @@ def fetch_source_entries(channel_url: str, source_key: str, limit: int = None):
     entries = []
     if not data:
         return entries
-    for item in data.get('entries') or []:
-        if not isinstance(item, dict):
-            continue
-        video_id = item.get('id')
+    for item in _iter_playlist_items(data.get('entries') or []):
+        video_id = _video_id_from_item(item)
         if not video_id:
             continue
         raw_url = item.get('url') or item.get('webpage_url') or ''
-        if not raw_url.startswith('http'):
+        if not str(raw_url).startswith('http'):
             raw_url = f'https://www.youtube.com/watch?v={video_id}'
         entries.append({
             'video_id': video_id,
@@ -294,6 +354,8 @@ def fetch_source_entries(channel_url: str, source_key: str, limit: int = None):
             'url': raw_url,
             'source': source_key,
         })
+        if len(entries) >= limit:
+            break
     return entries
 
 
@@ -325,14 +387,13 @@ def find_new_entries(entries, last_seen_video_id):
 def initialize_baselines(sub: dict, source_entries: dict) -> dict:
     now = datetime.now(timezone.utc).isoformat()
     sub['initialized_at'] = sub.get('initialized_at') or now
+    sub.setdefault('sources_state', {})
+    notified = set(sub.get('notified_video_ids') or [])
     for source_key, entries in source_entries.items():
-        src_state = sub['sources_state'].setdefault(source_key, {
-            'last_seen_video_id': None,
-            'last_seen_title': None,
-        })
-        if entries:
-            src_state['last_seen_video_id'] = entries[0]['video_id']
-            src_state['last_seen_title'] = entries[0]['title']
+        src_state = sub['sources_state'].setdefault(source_key, _empty_source_state())
+        ids = _snapshot_source(src_state, entries)
+        notified.update(ids)
+    sub['notified_video_ids'] = list(notified)
     return sub
 
 
@@ -460,7 +521,8 @@ async def deliver_new_video(application, chat_id, sub, entry):
     context = _DownloadContext(application.bot_data)
 
     async def run_delivery():
-        for mode in delivery:
+        modes = list(delivery)
+        for index, mode in enumerate(modes):
             if cancel_token.is_cancelled():
                 return
             quality = build_youtube_audio_option() if mode == 'audio' else FIXED_VIDEO_QUALITY
@@ -473,6 +535,7 @@ async def deliver_new_video(application, chat_id, sub, entry):
                 None,
                 should_cancel=cancel_token.is_cancelled,
                 quiet_complete=True,
+                delete_status=(index == len(modes) - 1),
             )
 
     await queue.enqueue(
@@ -484,10 +547,27 @@ async def deliver_new_video(application, chat_id, sub, entry):
     )
 
 
+def _collect_unnotified(entries, notified, pending_ids):
+    """entries מהחדש לישן; מחזיר מהישן לחדש, בלי ID שכבר ראינו."""
+    collected = []
+    for entry in reversed(entries):
+        video_id = entry['video_id']
+        if video_id in notified or video_id in pending_ids:
+            continue
+        collected.append(entry)
+        pending_ids.add(video_id)
+    return collected
+
+
 def check_subscription_for_new_videos(sub: dict):
-    """מחזיר (updated_sub, new_entries). בלי שליחה."""
+    """מחזיר (updated_sub, new_entries). בלי שליחה.
+
+    זיהוי לפי סט ID-ים (notified + חלון seen), לא לפי מצביע בראש הרשימה.
+    ID חדש נכנס ל-notified רק אחרי שליחה מוצלחת ב-run_check.
+    """
     notified = set(sub.get('notified_video_ids') or [])
     new_entries = []
+    pending_ids = set()
     for source_key in sub.get('sources') or ['videos']:
         try:
             with track_ytdlp_metadata():
@@ -499,27 +579,41 @@ def check_subscription_for_new_videos(sub: dict):
             )
             continue
 
-        src_state = sub['sources_state'].setdefault(source_key, {
-            'last_seen_video_id': None,
-            'last_seen_title': None,
-        })
+        src_state = sub['sources_state'].setdefault(source_key, _empty_source_state())
         if not entries:
             continue
 
+        ids = [entry['video_id'] for entry in entries]
         last_seen = src_state.get('last_seen_video_id')
-        if not last_seen:
-            src_state['last_seen_video_id'] = entries[0]['video_id']
-            src_state['last_seen_title'] = entries[0]['title']
+        seen = src_state.get('seen_video_ids') or []
+
+        if not last_seen and not seen:
+            notified.update(ids)
+            _snapshot_source(src_state, entries)
             continue
 
-        found = find_new_entries(entries, last_seen)
-        src_state['last_seen_video_id'] = entries[0]['video_id']
-        src_state['last_seen_title'] = entries[0]['title']
-        for entry in reversed(found):
-            if entry['video_id'] in notified:
+        if not seen:
+            # מנוי ישן בלי חלון seen: מיגרציה חד-פעמית מהמצביע.
+            current_ids = set(ids)
+            if last_seen not in current_ids:
+                logger.info(
+                    f"Channel watch last_seen missing for "
+                    f"{sub.get('channel_label')} /{source_key}; "
+                    "seeding window without delivering"
+                )
+                notified.update(ids)
+                _snapshot_source(src_state, entries)
                 continue
-            new_entries.append(entry)
-            notified.add(entry['video_id'])
+            found = find_new_entries(entries, last_seen)
+            found_ids = {entry['video_id'] for entry in found}
+            for video_id in ids:
+                if video_id not in found_ids:
+                    notified.add(video_id)
+            new_entries.extend(_collect_unnotified(found, notified, pending_ids))
+        else:
+            new_entries.extend(_collect_unnotified(entries, notified, pending_ids))
+
+        _snapshot_source(src_state, entries)
 
     sub['notified_video_ids'] = list(notified)
     return sub, new_entries
@@ -562,12 +656,17 @@ class ChannelWatchManager:
                     logger.info(f"Next channel watch check in {hours:.1f} hours")
                     await asyncio.sleep(delay)
                 try:
-                    await self.run_check()
+                    ran = await self.run_check()
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
                     logger.error(f"Channel watch check failed: {e}")
-                    set_channel_watch_last_run(datetime.now(timezone.utc).isoformat())
+                    ran = False
+                if not ran:
+                    logger.info(
+                        f"Channel watch will retry in {CHANNEL_WATCH_RETRY_SECONDS}s"
+                    )
+                    await asyncio.sleep(CHANNEL_WATCH_RETRY_SECONDS)
         except asyncio.CancelledError:
             logger.info("Channel watch task cancelled")
             raise
@@ -585,14 +684,32 @@ class ChannelWatchManager:
                 updated, new_entries = await asyncio.to_thread(
                     check_subscription_for_new_videos, sub
                 )
+                notified = list(updated.get('notified_video_ids') or [])
                 update_channel_sub(
                     user_id,
                     index,
                     sources_state=updated.get('sources_state'),
-                    notified_video_ids=updated.get('notified_video_ids'),
+                    notified_video_ids=notified,
                 )
                 for entry in new_entries:
-                    await deliver_new_video(self._application, user_id, updated, entry)
+                    video_id = entry.get('video_id')
+                    try:
+                        await deliver_new_video(
+                            self._application, user_id, updated, entry
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"Channel watch delivery failed for user {user_id} "
+                            f"{sub.get('channel_label')} {video_id}: {e}"
+                        )
+                        continue
+                    if video_id and video_id not in notified:
+                        notified.append(video_id)
+                    update_channel_sub(
+                        user_id,
+                        index,
+                        notified_video_ids=notified,
+                    )
                     delivered += 1
             except Exception as e:
                 logger.error(
