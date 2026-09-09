@@ -19,6 +19,7 @@ from download_manager import (
     build_quality_cache_token,
     download_with_quality,
 )
+import utils
 from utils import (
     extract_available_youtube_heights,
     build_youtube_quality_option,
@@ -784,6 +785,97 @@ def test_estimate_media_size_sums_requested_formats():
 
     assert estimated_size == 3500
     assert is_approximate is True
+
+
+def test_estimate_size_falls_back_to_bitrate_when_filesize_missing():
+    """יוטיוב לא תמיד מחזיר filesize לזרמי DASH. בלי חישוב לפי bitrate*duration
+    רק האודיו נספר - וכל האיכויות הראו בדיוק אותו גודל."""
+    info = {
+        'duration': 125,
+        'requested_formats': [
+            {'vcodec': 'av01', 'acodec': 'none', 'tbr': 2500},
+            {'vcodec': 'none', 'acodec': 'mp4a.40.2', 'filesize': 2_000_000},
+        ],
+    }
+
+    estimated_size, is_approximate = estimate_media_size(info)
+
+    assert estimated_size == int(2500 * 1000 * 125 / 8) + 2_000_000
+    assert is_approximate is True
+
+
+def test_options_without_filesize_differ_per_quality():
+    """באג: כל האיכויות הוצגו עם אותו גודל משוער (גודל האודיו בלבד)."""
+    info = {
+        'duration': 125,
+        'formats': [
+            {'format_id': '399', 'height': 1080, 'vcodec': 'av01', 'acodec': 'none', 'ext': 'mp4', 'tbr': 1600},
+            {'format_id': '247', 'height': 720, 'vcodec': 'vp9', 'acodec': 'none', 'ext': 'mp4', 'tbr': 290},
+            {'format_id': '140', 'height': None, 'vcodec': 'none', 'acodec': 'mp4a.40.2', 'ext': 'm4a', 'abr': 128, 'filesize': 2_000_000},
+        ],
+    }
+
+    options = build_youtube_download_options_from_info(info, max_file_size=100 * 1024 * 1024)
+    sizes = {option['quality_name']: option['estimated_size_bytes'] for option in options}
+
+    assert sizes['1080p'] != sizes['720p']
+    assert sizes['1080p'] == int(1600 * 1000 * 125 / 8) + 2_000_000
+    assert sizes['720p'] == int(290 * 1000 * 125 / 8) + 2_000_000
+
+
+def test_deno_detection_reports_version(monkeypatch, caplog):
+    monkeypatch.setattr(utils, '_deno_info', None)
+    monkeypatch.setattr(utils.shutil, 'which', lambda name: '/usr/bin/deno')
+    monkeypatch.setattr(
+        utils.subprocess, 'run',
+        lambda *args, **kwargs: MagicMock(returncode=0, stdout='deno 2.1.4\nv8 13.0\ntypescript 5.6\n')
+    )
+
+    with caplog.at_level(logging.INFO):
+        assert utils.check_deno_on_startup() is True
+
+    assert utils.get_deno_info()['version'] == 'deno 2.1.4'
+    assert 'deno 2.1.4' in caplog.text
+
+
+def test_deno_detection_when_missing(monkeypatch, caplog):
+    monkeypatch.setattr(utils, '_deno_info', None)
+    monkeypatch.setattr(utils.shutil, 'which', lambda name: None)
+
+    with caplog.at_level(logging.WARNING):
+        assert utils.check_deno_on_startup() is False
+
+    assert 'Deno not found' in caplog.text
+
+
+def test_deno_detection_survives_broken_version_command(monkeypatch):
+    """deno שקיים אבל --version נכשל/נתקע עדיין נחשב זמין."""
+    monkeypatch.setattr(utils, '_deno_info', None)
+    monkeypatch.setattr(utils.shutil, 'which', lambda name: '/usr/bin/deno')
+
+    def explode(*args, **kwargs):
+        raise OSError('cannot execute')
+
+    monkeypatch.setattr(utils.subprocess, 'run', explode)
+
+    assert utils.is_deno_available() is True
+    assert utils.get_deno_info()['version'] is None
+
+
+def test_deno_detection_is_cached(monkeypatch):
+    monkeypatch.setattr(utils, '_deno_info', None)
+    calls = []
+
+    def fake_which(name):
+        calls.append(name)
+        return None
+
+    monkeypatch.setattr(utils.shutil, 'which', fake_which)
+
+    utils.is_deno_available()
+    utils.is_deno_available()
+
+    assert calls == ['deno']
 
 
 def test_format_file_size_formats_gigabytes():

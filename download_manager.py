@@ -6,6 +6,7 @@ from logger_setup import logger, log_download, format_requester_for_log
 from user_settings import remember_chat
 from config import DOWNLOADS_DIR, MAX_FILE_SIZE, FACEBOOK_COOKIES_FILE
 from download_cache import get_cached_file, save_cached_file, delete_cached_file
+from cache_metadata_backfill import fetch_video_metadata
 from utils import (
     send_video_with_long_caption,
     is_ffmpeg_available,
@@ -91,10 +92,14 @@ async def try_send_cached_media(status_message, context, cached_entry, quality, 
                 title=title,
             )
         else:
-            await status_message.get_bot().send_video(
-                chat_id=status_message.chat_id,
-                video=file_id,
-                caption=title,
+            await send_video_with_long_caption(
+                status_message,
+                file_id,
+                {
+                    'title': title,
+                    'description': cached_entry.get('description') or '',
+                    'uploader': cached_entry.get('uploader') or 'Unknown',
+                },
                 supports_streaming=True,
             )
     except Exception as e:
@@ -397,6 +402,30 @@ async def download_with_quality(context, status_message, url, download_mode, qua
         cached_entry = get_cached_file(cache_url_key, download_mode, quality_cache_token)
         if cached_entry:
             logger.info(f"Cache hit for {cache_url_key} ({download_mode}/{quality_cache_token})")
+
+            # רשת ביטחון לרשומות ישנות שמיגרציית cache_metadata_backfill עוד
+            # לא הספיקה להשלים (או שנכשלה עליהן) - משלימים כאן פעם אחת,
+            # בלי להוריד מחדש את קובץ הווידאו.
+            if download_mode == 'video' and cached_entry.get('description') is None:
+                try:
+                    cached_metadata = fetch_video_metadata(url)
+                    cached_entry['title'] = cached_metadata['title'] or cached_entry.get('title')
+                    cached_entry['description'] = cached_metadata['description']
+                    cached_entry['uploader'] = cached_metadata['uploader']
+                    save_cached_file(
+                        cache_url_key,
+                        download_mode,
+                        quality_cache_token,
+                        cached_entry['file_id'],
+                        title=cached_entry['title'],
+                        description=cached_entry['description'],
+                        uploader=cached_entry['uploader'],
+                    )
+                except Exception as metadata_error:
+                    logger.warning(
+                        f"Could not refresh metadata for legacy cache entry: {metadata_error}"
+                    )
+
             if await try_send_cached_media(
                 status_message, context, cached_entry, quality, download_mode,
                 is_playlist, quiet_complete
@@ -926,6 +955,8 @@ async def download_with_quality(context, status_message, url, download_mode, qua
                                 quality_cache_token,
                                 cached_file_id,
                                 title=info.get('title'),
+                                description=info.get('description') or '',
+                                uploader=info.get('uploader') or '',
                             )
                     except Exception as cache_error:
                         logger.warning(f"Could not save download cache entry: {cache_error}")

@@ -47,10 +47,20 @@ def _get_connection() -> sqlite3.Connection:
             quality_name TEXT NOT NULL,
             file_id TEXT NOT NULL,
             title TEXT,
+            description TEXT,
+            uploader TEXT,
             created_at TEXT NOT NULL
         )
         """
     )
+    existing_columns = {
+        row['name']
+        for row in conn.execute('PRAGMA table_info(cached_downloads)').fetchall()
+    }
+    if 'description' not in existing_columns:
+        conn.execute('ALTER TABLE cached_downloads ADD COLUMN description TEXT')
+    if 'uploader' not in existing_columns:
+        conn.execute('ALTER TABLE cached_downloads ADD COLUMN uploader TEXT')
     conn.commit()
     _local.conn = conn
     return conn
@@ -107,20 +117,33 @@ def build_cache_key(url: str, download_mode: str, quality_name: str) -> str:
 
 
 def get_cached_file(url: str, download_mode: str, quality_name: str) -> dict | None:
-    """מחזיר {'file_id', 'title'} אם יש cache hit, אחרת None."""
+    """מחזיר את מזהה הקובץ והמטא-דאטה הדרושים לשליחה חוזרת."""
     key = build_cache_key(url, download_mode, quality_name)
     with _lock:
         conn = _get_connection()
         row = conn.execute(
-            'SELECT file_id, title FROM cached_downloads WHERE cache_key = ?',
+            'SELECT file_id, title, description, uploader FROM cached_downloads WHERE cache_key = ?',
             (key,),
         ).fetchone()
     if not row:
         return None
-    return {'file_id': row['file_id'], 'title': row['title']}
+    return {
+        'file_id': row['file_id'],
+        'title': row['title'],
+        'description': row['description'],
+        'uploader': row['uploader'],
+    }
 
 
-def save_cached_file(url: str, download_mode: str, quality_name: str, file_id: str, title: str = None):
+def save_cached_file(
+    url: str,
+    download_mode: str,
+    quality_name: str,
+    file_id: str,
+    title: str = None,
+    description: str = None,
+    uploader: str = None,
+):
     if not file_id:
         return
     key = build_cache_key(url, download_mode, quality_name)
@@ -128,17 +151,65 @@ def save_cached_file(url: str, download_mode: str, quality_name: str, file_id: s
         conn = _get_connection()
         conn.execute(
             """
-            INSERT INTO cached_downloads (cache_key, url, download_mode, quality_name, file_id, title, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO cached_downloads (
+                cache_key, url, download_mode, quality_name, file_id, title,
+                description, uploader, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(cache_key) DO UPDATE SET
                 file_id = excluded.file_id,
                 title = excluded.title,
+                description = excluded.description,
+                uploader = excluded.uploader,
                 created_at = excluded.created_at
             """,
-            (key, url, download_mode, quality_name, file_id, title, datetime.now(timezone.utc).isoformat()),
+            (
+                key, url, download_mode, quality_name, file_id, title,
+                description, uploader, datetime.now(timezone.utc).isoformat()
+            ),
         )
         conn.commit()
     logger.info(f"Cached file_id for key={key}")
+
+
+def get_entries_missing_metadata(download_mode: str = 'video', limit: int = None) -> list[dict]:
+    """מחזיר רשומות שנשמרו לפני שהתיאור נכנס ל-cache (description IS NULL).
+
+    שדה ריק נשמר כמחרוזת ריקה ולא כ-NULL, כך ש-NULL מסמן "מעולם לא נשלף"
+    ולא "אין תיאור" - וסרטון בלי תיאור לא ייבדק שוב ושוב.
+    """
+    query = (
+        'SELECT cache_key, url, download_mode, quality_name, title '
+        'FROM cached_downloads WHERE description IS NULL'
+    )
+    params = []
+    if download_mode:
+        query += ' AND download_mode = ?'
+        params.append(download_mode)
+    query += ' ORDER BY created_at'
+    if limit:
+        query += ' LIMIT ?'
+        params.append(int(limit))
+
+    with _lock:
+        conn = _get_connection()
+        rows = conn.execute(query, tuple(params)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_entry_metadata(cache_key: str, title: str = None, description: str = None, uploader: str = None):
+    """מעדכן metadata לרשומה קיימת בלי לגעת ב-file_id וב-created_at."""
+    with _lock:
+        conn = _get_connection()
+        conn.execute(
+            """
+            UPDATE cached_downloads
+            SET title = COALESCE(?, title), description = ?, uploader = ?
+            WHERE cache_key = ?
+            """,
+            (title, description, uploader, cache_key),
+        )
+        conn.commit()
 
 
 def delete_cached_file(url: str, download_mode: str, quality_name: str):

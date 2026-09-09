@@ -3,6 +3,7 @@ import asyncio
 import telegram
 import shutil
 import os
+import subprocess
 import uuid
 import yt_dlp
 from logger_setup import logger
@@ -30,6 +31,62 @@ def check_ffmpeg_on_startup():
     else:
         logger.warning("FFmpeg not found - audio downloads may result in larger video files")
     return is_ffmpeg_available()
+
+# זיהוי Deno. yt-dlp יכול להשתמש בו כ-JS runtime חיצוני לפתרון אתגרי
+# הסקריפט של יוטיוב (nsig / PO token); בלעדיו הוא נופל למפרש ה-JS
+# הפנימי שלו, שאיטי יותר ונשבר מוקדם יותר כשיוטיוב משנה את האתגר.
+_deno_info = None
+
+def _detect_deno():
+    """מאתר את deno ב-PATH ומנסה לקרוא את מספר הגרסה שלו."""
+    executable_path = shutil.which('deno')
+    if not executable_path:
+        return {'available': False, 'version': None, 'path': None}
+
+    version = None
+    try:
+        result = subprocess.run(
+            [executable_path, '--version'],
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            timeout=5,
+            check=False,
+        )
+        if result.returncode == 0:
+            # הפלט הוא כמה שורות (deno / v8 / typescript) - הראשונה מספיקה
+            first_line = (result.stdout or '').strip().splitlines()
+            version = first_line[0].strip() if first_line else None
+    except (OSError, subprocess.SubprocessError):
+        version = None
+
+    return {'available': True, 'version': version, 'path': executable_path}
+
+def get_deno_info():
+    """מחזיר {'available', 'version', 'path'} - נבדק פעם אחת ונשמר."""
+    global _deno_info
+    if _deno_info is None:
+        _deno_info = _detect_deno()
+    return _deno_info
+
+def is_deno_available():
+    """בודק אם Deno מותקן במערכת"""
+    return get_deno_info()['available']
+
+def check_deno_on_startup():
+    """בדיקת Deno בהפעלת הבוט - מציג הודעה פעם אחת"""
+    info = get_deno_info()
+    if info['available']:
+        logger.info(
+            f"Deno detected ({info['version'] or 'version unknown'}) - "
+            "available to yt-dlp as JS runtime for YouTube challenges"
+        )
+    else:
+        logger.warning(
+            "Deno not found - yt-dlp will fall back to its built-in JS interpreter"
+        )
+    return info['available']
 
 def clean_filename(filename):
     """מנקה שם קובץ מתווים לא חוקיים ומקצר אותו אם צריך"""
@@ -337,11 +394,14 @@ def fetch_format_info(url, format_selector):
         return ydl.extract_info(url, download=False)
 
 
-def estimate_selected_format_size(selected_formats):
-    """מחזיר גודל צפוי בבתים עבור רשימת פורמטים נבחרים."""
+def estimate_selected_format_size(selected_formats, duration=None):
+    """מחזיר גודל צפוי בבתים עבור רשימת פורמטים נבחרים.
+
+    כש-YouTube לא מספק filesize לזרם DASH, מחשב אותו לפי bitrate ומשך
+    הסרטון. בלי זה רק גודל האודיו היה נספר וכל הרזולוציות נראו זהות.
+    """
     total_size = 0
     used_approximation = False
-    has_size_data = False
 
     for item in selected_formats:
         if not item:
@@ -352,15 +412,18 @@ def estimate_selected_format_size(selected_formats):
 
         if exact_size:
             total_size += int(exact_size)
-            has_size_data = True
         elif approx_size:
             total_size += int(approx_size)
             used_approximation = True
-            has_size_data = True
         else:
+            bitrate_kbps = item.get('tbr') or item.get('vbr') or item.get('abr')
+            if not bitrate_kbps or not duration:
+                return None, True
+
+            total_size += int(float(bitrate_kbps) * 1000 * float(duration) / 8)
             used_approximation = True
 
-    if not has_size_data:
+    if not total_size:
         return None, True
 
     return total_size, used_approximation
@@ -437,11 +500,16 @@ def pick_best_youtube_video_format(formats, max_height, prefer_separate_streams=
     return None
 
 
-def estimate_youtube_download_option_size(option, formats, best_audio_format=None):
+def estimate_youtube_download_option_size(
+    option,
+    formats,
+    best_audio_format=None,
+    duration=None,
+):
     """מחשב גודל צפוי עבור אפשרות הורדה מיוטיוב מתוך metadata שכבר נשלף."""
     if option.get('download_mode') == 'audio':
         selected_formats = [best_audio_format] if best_audio_format else []
-        return estimate_selected_format_size(selected_formats)
+        return estimate_selected_format_size(selected_formats, duration=duration)
 
     prefer_separate_streams = best_audio_format is not None
     selected_video_format = pick_best_youtube_video_format(
@@ -457,7 +525,7 @@ def estimate_youtube_download_option_size(option, formats, best_audio_format=Non
     if selected_video_format.get('acodec') == 'none' and best_audio_format:
         selected_formats.append(best_audio_format)
 
-    return estimate_selected_format_size(selected_formats)
+    return estimate_selected_format_size(selected_formats, duration=duration)
 
 
 def build_youtube_download_options_from_info(info, max_file_size):
@@ -476,7 +544,8 @@ def build_youtube_download_options_from_info(info, max_file_size):
         estimated_size_bytes, is_size_approximate = estimate_youtube_download_option_size(
             enriched_option,
             formats,
-            best_audio_format=best_audio_format
+            best_audio_format=best_audio_format,
+            duration=(info or {}).get('duration'),
         )
         enriched_option['estimated_size_bytes'] = estimated_size_bytes
         enriched_option['is_size_approximate'] = is_size_approximate
@@ -498,7 +567,10 @@ def build_youtube_download_options_from_info(info, max_file_size):
 def estimate_media_size(info):
     """מחזיר גודל צפוי בבתים עבור הפורמט שנבחר."""
     selected_formats = info.get('requested_formats') or [info]
-    return estimate_selected_format_size(selected_formats)
+    return estimate_selected_format_size(
+        selected_formats,
+        duration=info.get('duration'),
+    )
 
 
 def format_file_size(size_bytes):
@@ -710,10 +782,15 @@ async def send_video_with_long_caption(message, video_file, video_info, **kwargs
             **kwargs
         )
         
-        # שליחת החלקים הנוספים כהודעות נפרדות
+        # שליחת החלקים הנוספים כהודעות נפרדות. כישלון כאן לא נחשב כישלון
+        # של השליחה - הסרטון כבר הגיע, ואם נזרוק שגיאה הקורא יחשוב שהכל
+        # נכשל (ובמסלול ה-cache אפילו יוריד את הסרטון מחדש וישלח כפול).
         for chunk in text_chunks[1:]:
             if chunk.strip():
-                await bot.send_message(chat_id=chat_id, text=chunk)
+                try:
+                    await bot.send_message(chat_id=chat_id, text=chunk)
+                except Exception as chunk_error:
+                    logger.warning(f"Could not send caption continuation chunk: {chunk_error}")
         
         return video_message
         

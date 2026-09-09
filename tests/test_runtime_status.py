@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 from runtime_status import (
     RLM,
+    format_deno_line,
     format_docker_line,
     format_duration_he,
     format_status_message,
@@ -97,6 +98,26 @@ def test_format_status_includes_docker_uptime():
         },
     )
     assert f'ה-Docker:{RLM} 1 שעה, 1 דקה' in text
+
+
+def test_format_status_includes_deno_version():
+    text = format_status_message(
+        host_uptime=10,
+        service_uptime=10,
+        git_info={'hash': 'abc1234', 'subject': 'x', 'dirty': False},
+        version='0.13.1',
+        queue_snapshot={'running': False, 'running_elapsed': None, 'waiting': 0},
+        deno_info={'available': True, 'version': 'deno 2.1.4', 'path': '/usr/bin/deno'},
+    )
+    assert 'Deno: 2.1.4' in text
+
+
+def test_format_deno_line_states():
+    assert format_deno_line(None) is None
+    assert format_deno_line({'available': False, 'version': None}) == 'Deno: לא מותקן ⚠️'
+    assert format_deno_line({'available': True, 'version': 'deno 2.1.4'}) == 'Deno: 2.1.4'
+    # deno שקיים אבל --version נכשל
+    assert format_deno_line({'available': True, 'version': None}) == 'Deno: מותקן'
 
 
 def test_format_docker_line_states():

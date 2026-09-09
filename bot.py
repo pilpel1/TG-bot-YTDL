@@ -1,3 +1,5 @@
+import asyncio
+
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram.error import NetworkError, TimedOut
@@ -10,7 +12,8 @@ from bot_handlers import (
     remember_incoming, build_bot_commands,
     refresh_all_user_command_menus,
 )
-from utils import cleanup_temp_files, check_ffmpeg_on_startup
+from utils import cleanup_temp_files, check_ffmpeg_on_startup, check_deno_on_startup
+from cache_metadata_backfill import run_backfill_in_background
 from download_queue import DownloadQueue
 from ytdlp_updater import YtdlpUpdateManager
 from channel_watch import ChannelWatchManager
@@ -34,6 +37,13 @@ async def post_init(application):
     channel_watch.start()
     application.bot_data['channel_watch'] = channel_watch
 
+    # השלמת תיאורים לרשומות cache ישנות. רץ ברקע (ב-thread נפרד) כדי לא
+    # לעכב את ה-polling, ומסיים מיד כשאין מה להשלים - כלומר אחרי ההרצה
+    # המוצלחת הראשונה זה כבר no-op בכל עלייה.
+    application.bot_data['cache_backfill_task'] = asyncio.create_task(
+        run_backfill_in_background()
+    )
+
     # ברירת מחדל גלובלית (כבוי). לכל משתמש מתעדכן תפריט פרטי
     # ב-/search_mode, /start ו-/help דרך BotCommandScopeChat.
     await application.bot.set_my_commands(build_bot_commands(search_mode_on=False))
@@ -45,6 +55,11 @@ async def post_stop(application):
     הנכונה לעצור טאסקים ברקע שהתחלנו ב-post_init. בלי זה, worker התור
     נשאר "תלוי" כש-run_polling סוגר את ה-loop בסגירה עם Ctrl+C, וגורם
     ל-'Task was destroyed but it is pending!' בלוגים."""
+    cache_backfill_task = application.bot_data.get('cache_backfill_task')
+    if cache_backfill_task and not cache_backfill_task.done():
+        cache_backfill_task.cancel()
+        logger.info("Cache metadata backfill cancelled")
+
     ytdlp_updater = application.bot_data.get('ytdlp_updater')
     if ytdlp_updater:
         await ytdlp_updater.stop()
@@ -95,6 +110,9 @@ def main():
         
         # בדיקת FFmpeg
         check_ffmpeg_on_startup()
+
+        # בדיקת Deno (JS runtime שיוטיוב מצריך יותר ויותר)
+        check_deno_on_startup()
         
         if LOCAL_API_AVAILABLE:
             logger.info("Local API Server detected - using 2GB mode")

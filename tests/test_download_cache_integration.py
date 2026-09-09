@@ -78,9 +78,16 @@ async def test_cache_hit_sends_file_id_without_touching_yt_dlp():
 
 
 @pytest.mark.asyncio
-async def test_cache_hit_video_sends_by_file_id():
+async def test_cache_hit_video_sends_by_file_id_with_full_description():
+    """שליחה מהמטמון חייבת לכלול את אותו caption מלא (כותרת + תיאור) כמו
+    בהורדה רגילה - לא רק את הכותרת."""
     quality_token = download_manager.build_quality_cache_token('video', VIDEO_QUALITY)
-    download_cache.save_cached_file(URL, 'video', quality_token, 'CACHED_VIDEO_ID')
+    download_cache.save_cached_file(
+        URL, 'video', quality_token, 'CACHED_VIDEO_ID',
+        title='Some title',
+        description='התיאור המלא של הסרטון',
+        uploader='Some Channel',
+    )
     status_message, bot = make_status_message()
     context = make_context()
 
@@ -92,7 +99,41 @@ async def test_cache_hit_video_sends_by_file_id():
     mock_ydl_class.assert_not_called()
     bot.send_video.assert_awaited_once()
     assert bot.send_video.call_args.kwargs['video'] == 'CACHED_VIDEO_ID'
+    caption = bot.send_video.call_args.kwargs['caption']
+    assert 'Some title' in caption
+    assert 'התיאור המלא של הסרטון' in caption
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_cache_entry_without_description_is_backfilled():
+    """רשומות שנשמרו לפני שהתיאור נכנס ל-cache נשלחו בלי תיאור. משלימים
+    metadata פעם אחת (בלי להוריד את הקובץ) ושומרים אותו לפעם הבאה."""
+    quality_token = download_manager.build_quality_cache_token('video', VIDEO_QUALITY)
+    download_cache.save_cached_file(URL, 'video', quality_token, 'CACHED_VIDEO_ID', title='Old title')
+    status_message, bot = make_status_message()
+    context = make_context()
+
+    fake_metadata = {
+        'title': 'Fresh title',
+        'description': 'תיאור שהושלם בדיעבד',
+        'uploader': 'Some Channel',
+    }
+
+    with patch('download_manager.yt_dlp.YoutubeDL') as mock_ydl_class, \
+         patch('download_manager.fetch_video_metadata', return_value=fake_metadata):
+        await download_manager.download_with_quality(
+            context, status_message, URL, 'video', VIDEO_QUALITY, None
+        )
+
+    # לא נגענו ב-yt-dlp של מסלול ההורדה - רק בשליפת ה-metadata
+    mock_ydl_class.assert_not_called()
+    caption = bot.send_video.call_args.kwargs['caption']
+    assert 'תיאור שהושלם בדיעבד' in caption
+
+    cached = download_cache.get_cached_file(URL, 'video', quality_token)
+    assert cached['description'] == 'תיאור שהושלם בדיעבד'
+    assert cached['title'] == 'Fresh title'
 
 
 @pytest.mark.asyncio
@@ -150,4 +191,5 @@ async def test_successful_download_saves_file_id_to_cache(tmp_path, monkeypatch)
     bot.send_audio.assert_awaited_once()
 
     cached = download_cache.get_cached_file(URL, 'audio', AUDIO_TOKEN)
-    assert cached == {'file_id': 'NEW_FILE_ID', 'title': 'Never Gonna Give You Up'}
+    assert cached['file_id'] == 'NEW_FILE_ID'
+    assert cached['title'] == 'Never Gonna Give You Up'

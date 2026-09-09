@@ -87,7 +87,28 @@ def test_save_then_get_returns_file_id_and_title():
     save_cached_file(url, 'audio', AUDIO_QUALITY, 'FILE_ID_123', title='Never Gonna Give You Up')
 
     cached = get_cached_file(url, 'audio', AUDIO_QUALITY)
-    assert cached == {'file_id': 'FILE_ID_123', 'title': 'Never Gonna Give You Up'}
+    assert cached == {
+        'file_id': 'FILE_ID_123',
+        'title': 'Never Gonna Give You Up',
+        'description': None,
+        'uploader': None,
+    }
+
+
+def test_save_then_get_round_trips_description_and_uploader():
+    """התיאור נשמר ב-cache כדי שהשליחה מהמטמון תכלול את אותו caption מלא
+    כמו בהורדה הרגילה (בלי זה נשלחה רק הכותרת)."""
+    url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+    save_cached_file(
+        url, 'video', VIDEO_HIGH, 'FILE_ID_123',
+        title='Some title',
+        description='שורה ראשונה\nשורה שנייה',
+        uploader='Some Channel',
+    )
+
+    cached = get_cached_file(url, 'video', VIDEO_HIGH)
+    assert cached['description'] == 'שורה ראשונה\nשורה שנייה'
+    assert cached['uploader'] == 'Some Channel'
 
 
 def test_save_is_idempotent_upsert_on_same_key():
@@ -96,7 +117,8 @@ def test_save_is_idempotent_upsert_on_same_key():
     save_cached_file(url, 'video', VIDEO_REGULAR, 'NEW_FILE_ID', title='New title')
 
     cached = get_cached_file(url, 'video', VIDEO_REGULAR)
-    assert cached == {'file_id': 'NEW_FILE_ID', 'title': 'New title'}
+    assert cached['file_id'] == 'NEW_FILE_ID'
+    assert cached['title'] == 'New title'
 
     # ולא נשארו כפולות בטבלה
     conn = download_cache._get_connection()

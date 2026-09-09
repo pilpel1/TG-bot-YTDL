@@ -9,6 +9,7 @@ from typing import Optional
 
 from config import LOCAL_API_AVAILABLE, MAX_FILE_SIZE, VERSION
 from logger_setup import logger
+from utils import get_deno_info
 from ytdlp_updater import get_installed_ytdlp_version, is_maintenance_mode
 
 DOCKER_API_CONTAINER = 'telegram-bot-api'
@@ -172,6 +173,21 @@ def format_docker_line(docker_status: dict | None) -> str | None:
     return _docker_line(f'לא רץ ({status})')
 
 
+def format_deno_line(deno_info: dict | None) -> str | None:
+    """שורת Deno ל-/status. yt-dlp משתמש בו כ-JS runtime לאתגרי יוטיוב,
+    אז חסר/קיים זה מידע תפעולי ולא טריוויה."""
+    if not deno_info:
+        return None
+    if not deno_info.get('available'):
+        return 'Deno: לא מותקן ⚠️'
+
+    version = (deno_info.get('version') or '').strip()
+    # get_deno_info מחזיר את השורה המלאה של --version ("deno 2.1.4")
+    if version.lower().startswith('deno '):
+        version = version[5:].strip()
+    return f'Deno: {version}' if version else 'Deno: מותקן'
+
+
 def read_git_info(repo_root: Path | None = None) -> dict:
     root = repo_root or REPO_ROOT
     info = {'hash': None, 'subject': None, 'dirty': False}
@@ -266,6 +282,7 @@ def format_status_message(
     max_file_size: int = MAX_FILE_SIZE,
     ytdlp_version: str | None = None,
     docker_status: dict | None = None,
+    deno_info: dict | None = None,
 ) -> str:
     git_hash = git_info.get('hash')
     subject = (git_info.get('subject') or '').strip()
@@ -296,6 +313,9 @@ def format_status_message(
     lines.append(format_file_limit_line(max_file_size, local_api))
     if ytdlp_version:
         lines.append(f'yt-dlp: {ytdlp_version}')
+    deno_line = format_deno_line(deno_info)
+    if deno_line:
+        lines.append(deno_line)
     lines.append('תחזוקה: כן ⚠️' if maintenance else 'תחזוקה: לא')
     return '\n'.join(lines)
 
@@ -319,4 +339,5 @@ def build_status_text(context) -> str:
         max_file_size=MAX_FILE_SIZE,
         ytdlp_version=get_installed_ytdlp_version(),
         docker_status=get_docker_api_status(),
+        deno_info=get_deno_info(),
     )
