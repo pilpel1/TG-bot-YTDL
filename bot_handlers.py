@@ -1541,8 +1541,17 @@ async def version(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def _is_admin_message(update: Update) -> bool:
+    """True רק להודעת אדמין. אחרת פקודות ניהול שותקות לגמרי."""
+    user = update.effective_user
+    return bool(user and update.message and is_admin(user.id))
+
+
 async def mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ניטור פנימי: מצב שרת / מגבלת קבצים (לא בתפריט הפקודות)."""
+    """ניטור פנימי: מצב שרת / מגבלת קבצים. אדמין בלבד, אחרת שתיקה."""
+    if not _is_admin_message(update):
+        return
+
     file_size_gb = MAX_FILE_SIZE / (1024 * 1024 * 1024)
     file_size_mb = MAX_FILE_SIZE / (1024 * 1024)
 
@@ -1620,11 +1629,10 @@ async def offer_broadcast_confirm(reply_to, context, source_message):
 
 
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/broadcast — אדמין בלבד, לא בתפריט. בלי ID ב-.env הפקודה שותקת."""
-    user = update.effective_user
-    message = update.message
-    if not user or not message or not is_admin(user.id):
+    """/broadcast — אדמין בלבד. בלי ID ב-.env / למשתמש רגיל — שתיקה."""
+    if not _is_admin_message(update):
         return
+    message = update.message
 
     _clear_broadcast_state(context)
     replied = message.reply_to_message
@@ -1719,10 +1727,9 @@ async def backfill_known_user_profiles(bot):
 
 async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/users — אדמין בלבד. רשימת מי שמוכר לבוט, עם שמות."""
-    user = update.effective_user
-    message = update.message
-    if not user or not message or not is_admin(user.id):
+    if not _is_admin_message(update):
         return
+    message = update.message
 
     try:
         await backfill_known_user_profiles(context.bot)
