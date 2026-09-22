@@ -638,6 +638,7 @@ async def finalize_channel_add(message, context, user_id):
                     fetch_source_entries,
                     wizard['channel_url'],
                     source_key,
+                    channel_id=wizard.get('channel_id') or '',
                 )
         except Exception as e:
             logger.warning(f"Baseline fetch failed for {wizard.get('channel_label')} /{source_key}: {e}")

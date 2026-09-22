@@ -24,6 +24,7 @@ from channel_watch import (
     normalize_youtube_channel_url,
     seconds_until_next_watch,
     source_tab_url,
+    uploads_playlist_url,
     summarize_description_fallback,
     check_subscription_for_new_videos,
 )
@@ -60,11 +61,23 @@ def test_is_youtube_video_url():
 
 def test_source_tab_url():
     assert source_tab_url('https://www.youtube.com/@foo', 'shorts') == (
-        'https://www.youtube.com/@foo/shorts'
+        'https://www.youtube.com/@foo/shorts?view=0&sort=dd'
     )
     assert source_tab_url('https://www.youtube.com/@foo', 'videos') == (
         'https://www.youtube.com/@foo/videos?view=0&sort=dd'
     )
+
+
+def test_uploads_playlist_url_is_newest_first():
+    channel_id = 'UC' + ('a' * 22)
+    assert uploads_playlist_url(channel_id, 'shorts') == (
+        f'https://www.youtube.com/playlist?list=UUSH{"a" * 22}'
+    )
+    assert uploads_playlist_url(channel_id, 'videos') == (
+        f'https://www.youtube.com/playlist?list=UULF{"a" * 22}'
+    )
+    assert uploads_playlist_url('', 'shorts') is None
+    assert uploads_playlist_url('@foo', 'videos') is None
 
 
 def test_find_new_entries_oldest_to_newest_via_reverse():
@@ -227,31 +240,112 @@ def test_next_watch_slot_after_last_hour_goes_tomorrow():
     assert upcoming.date() == (now + timedelta(days=1)).date()
 
 
-def test_check_subscription_finds_new_below_sticky_first_item():
+def test_check_subscription_sends_only_ids_above_known_window():
     sub = _normalize_sub({
         'channel_url': 'https://www.youtube.com/@foo',
-        'sources': ['videos'],
-        'notified_video_ids': ['sticky', 'old'],
+        'channel_id': 'UC' + ('a' * 22),
+        'sources': ['shorts'],
+        'notified_video_ids': ['recent'],
         'sources_state': {
-            'videos': {
-                'last_seen_video_id': 'sticky',
-                'last_seen_title': 'live',
-                'seen_video_ids': ['sticky', 'old'],
+            'shorts': {
+                'last_seen_video_id': 'recent',
+                'last_seen_title': 'recent',
+                'seen_video_ids': ['recent'],
+                'list_order': 'uploads',
             },
         },
     })
     entries = [
-        {'video_id': 'sticky', 'title': 'Live', 'url': 'https://youtu.be/sticky', 'source': 'videos'},
-        {'video_id': 'new1', 'title': 'New', 'url': 'https://youtu.be/new1', 'source': 'videos'},
-        {'video_id': 'old', 'title': 'Old', 'url': 'https://youtu.be/old', 'source': 'videos'},
+        {'video_id': 'brandnew', 'title': 'New', 'url': 'https://youtu.be/brandnew', 'source': 'shorts'},
+        {'video_id': 'recent', 'title': 'Recent', 'url': 'https://youtu.be/recent', 'source': 'shorts'},
+        {'video_id': 'ancient', 'title': 'Old', 'url': 'https://youtu.be/ancient', 'source': 'shorts'},
     ]
     with patch('channel_watch.fetch_source_entries', return_value=entries):
         updated, new_entries = check_subscription_for_new_videos(sub)
-    assert [item['video_id'] for item in new_entries] == ['new1']
-    assert 'new1' not in updated['notified_video_ids']
-    assert updated['sources_state']['videos']['seen_video_ids'] == [
-        'sticky', 'new1', 'old',
+    assert [item['video_id'] for item in new_entries] == ['brandnew']
+    assert 'brandnew' not in updated['notified_video_ids']
+    assert 'ancient' in updated['notified_video_ids']
+    assert updated['sources_state']['shorts']['seen_video_ids'] == [
+        'brandnew', 'recent', 'ancient',
     ]
+
+
+def test_check_subscription_retries_failed_head_but_not_old_tail():
+    sub = _normalize_sub({
+        'channel_url': 'https://www.youtube.com/@foo',
+        'channel_id': 'UC' + ('a' * 22),
+        'sources': ['shorts'],
+        'notified_video_ids': ['old'],
+        'sources_state': {
+            'shorts': {
+                'last_seen_video_id': 'failed',
+                'last_seen_title': 'failed',
+                'seen_video_ids': ['failed', 'old'],
+                'list_order': 'uploads',
+            },
+        },
+    })
+    entries = [
+        {'video_id': 'failed', 'title': 'Failed', 'url': 'https://youtu.be/failed', 'source': 'shorts'},
+        {'video_id': 'old', 'title': 'Old', 'url': 'https://youtu.be/old', 'source': 'shorts'},
+        {'video_id': 'ancient', 'title': 'Ancient', 'url': 'https://youtu.be/ancient', 'source': 'shorts'},
+    ]
+    with patch('channel_watch.fetch_source_entries', return_value=entries):
+        updated, new_entries = check_subscription_for_new_videos(sub)
+    assert [item['video_id'] for item in new_entries] == ['failed']
+    assert 'failed' not in updated['notified_video_ids']
+    assert 'ancient' in updated['notified_video_ids']
+
+
+def test_sorted_window_without_overlap_is_delivered():
+    sub = _normalize_sub({
+        'channel_url': 'https://www.youtube.com/@foo',
+        'channel_id': 'UC' + ('a' * 22),
+        'sources': ['videos'],
+        'notified_video_ids': ['gone'],
+        'sources_state': {
+            'videos': {
+                'last_seen_video_id': 'gone',
+                'last_seen_title': 'gone',
+                'seen_video_ids': ['gone'],
+                'list_order': 'uploads',
+            },
+        },
+    })
+    entries = [
+        {'video_id': 'newer', 'title': 'N', 'url': 'https://youtu.be/newer', 'source': 'videos'},
+        {'video_id': 'also', 'title': 'A', 'url': 'https://youtu.be/also', 'source': 'videos'},
+    ]
+    with patch('channel_watch.fetch_source_entries', return_value=entries):
+        updated, new_entries = check_subscription_for_new_videos(sub)
+    assert [item['video_id'] for item in new_entries] == ['also', 'newer']
+    assert 'newer' not in updated['notified_video_ids']
+    assert 'also' not in updated['notified_video_ids']
+
+
+def test_shuffled_window_without_overlap_is_rebaselined():
+    sub = _normalize_sub({
+        'channel_url': 'https://www.youtube.com/@foo',
+        'channel_id': 'UC' + ('a' * 22),
+        'sources': ['shorts'],
+        'notified_video_ids': ['shuffled'],
+        'sources_state': {
+            'shorts': {
+                'last_seen_video_id': 'shuffled',
+                'last_seen_title': 'shuffled',
+                'seen_video_ids': ['shuffled'],
+            },
+        },
+    })
+    entries = [
+        {'video_id': 'real1', 'title': 'A', 'url': 'https://youtu.be/real1', 'source': 'shorts'},
+        {'video_id': 'real2', 'title': 'B', 'url': 'https://youtu.be/real2', 'source': 'shorts'},
+    ]
+    with patch('channel_watch.fetch_source_entries', return_value=entries):
+        updated, new_entries = check_subscription_for_new_videos(sub)
+    assert new_entries == []
+    assert set(updated['notified_video_ids']) >= {'shuffled', 'real1', 'real2'}
+    assert updated['sources_state']['shorts']['list_order'] == 'uploads'
 
 
 def test_check_subscription_missing_last_seen_does_not_dump_window():
@@ -302,6 +396,8 @@ def test_fetch_source_entries_skips_playlist_ids_and_flattens():
         ]
     }
 
+    seen_url = {}
+
     class FakeYDL:
         def __init__(self, opts):
             self.opts = opts
@@ -313,11 +409,16 @@ def test_fetch_source_entries_skips_playlist_ids_and_flattens():
             return False
 
         def extract_info(self, url, download=False):
+            seen_url['url'] = url
             return data
 
+    channel_id = 'UC' + ('a' * 22)
     with patch('channel_watch.yt_dlp.YoutubeDL', FakeYDL):
-        entries = fetch_source_entries('https://www.youtube.com/@foo', 'videos')
+        entries = fetch_source_entries(
+            'https://www.youtube.com/@foo', 'videos', channel_id=channel_id
+        )
     assert [item['video_id'] for item in entries] == ['abcdefghijk', 'bcdefghijkl']
+    assert seen_url['url'] == f'https://www.youtube.com/playlist?list=UULF{"a" * 22}'
 
 
 def _subs_tmp(tmp_path, monkeypatch):

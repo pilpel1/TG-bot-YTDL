@@ -223,12 +223,34 @@ def is_youtube_video_url(url: str) -> bool:
     return False
 
 
+_UPLOADS_PLAYLIST_PREFIX = {
+    'videos': 'UULF',
+    'shorts': 'UUSH',
+}
+
+
+def uploads_playlist_url(channel_id: str, source_key: str):
+    """פלייליסט העלאות של יוטיוב, תמיד מהחדש לישן.
+
+    UULF = סרטונים, UUSH = שורטס. ה-id הוא הקידומת + הערוץ בלי ה-UC.
+    """
+    channel_id = (channel_id or '').strip()
+    prefix = _UPLOADS_PLAYLIST_PREFIX.get(source_key)
+    if not prefix or not channel_id.startswith('UC') or len(channel_id) < 3:
+        return None
+    return f'https://www.youtube.com/playlist?list={prefix}{channel_id[2:]}'
+
+
 def source_tab_url(channel_url: str, source_key: str) -> str:
-    """טאב הערוץ. לסרטונים כופים Latest (sort=dd) כדי לא לקבל Popular."""
+    """טאב הערוץ, רק כשאין channel id. גם שורטס נכפים ל-Latest."""
     base = f"{channel_url.rstrip('/')}/{source_key}"
-    if source_key == 'videos':
+    if source_key in ('videos', 'shorts'):
         return f'{base}?view=0&sort=dd'
     return base
+
+
+def source_fetch_url(channel_url: str, source_key: str, channel_id: str = '') -> str:
+    return uploads_playlist_url(channel_id, source_key) or source_tab_url(channel_url, source_key)
 
 
 def _ydl_flat_opts():
@@ -283,6 +305,7 @@ def _empty_source_state():
         'last_seen_video_id': None,
         'last_seen_title': None,
         'seen_video_ids': [],
+        'list_order': None,
     }
 
 
@@ -328,9 +351,9 @@ def resolve_channel(url: str) -> dict:
     }
 
 
-def fetch_source_entries(channel_url: str, source_key: str, limit: int = None):
+def fetch_source_entries(channel_url: str, source_key: str, limit: int = None, channel_id: str = ''):
     limit = limit or CHANNEL_WATCH_FETCH_LIMIT
-    tab_url = source_tab_url(channel_url, source_key)
+    tab_url = source_fetch_url(channel_url, source_key, channel_id)
     opts = _ydl_flat_opts()
     opts['extract_flat'] = 'in_playlist'
     opts['ignoreerrors'] = True
@@ -389,9 +412,12 @@ def initialize_baselines(sub: dict, source_entries: dict) -> dict:
     sub['initialized_at'] = sub.get('initialized_at') or now
     sub.setdefault('sources_state', {})
     notified = set(sub.get('notified_video_ids') or [])
+    channel_id = sub.get('channel_id') or ''
     for source_key, entries in source_entries.items():
         src_state = sub['sources_state'].setdefault(source_key, _empty_source_state())
         ids = _snapshot_source(src_state, entries)
+        if uploads_playlist_url(channel_id, source_key):
+            src_state['list_order'] = 'uploads'
         notified.update(ids)
     sub['notified_video_ids'] = list(notified)
     return sub
@@ -559,19 +585,65 @@ def _collect_unnotified(entries, notified, pending_ids):
     return collected
 
 
+def _first_known_index(entries, known_ids):
+    for index, entry in enumerate(entries):
+        if entry['video_id'] in known_ids:
+            return index
+    return None
+
+
+def _select_new_on_sorted_list(entries, seen, notified, pending_ids, sorted_before):
+    """הרשימה מהחדש לישן. חדש = רק מה שמעל ה-ID הראשון שכבר מוכר.
+
+    כל מה שמתחתיו נכנס ל-notified בלי שליחה, גם אם הוא לא היה שם.
+    בלי חפיפה בכלל: אם הבדיקה הקודמת כבר הייתה על רשימה ממוינת, כל החלון חדש.
+    אחרת (המעבר מטאב שורטס מעורבב) — baseline בלי שליחה.
+    """
+    seen_set = set(seen or [])
+    anchor = _first_known_index(entries, seen_set | set(notified))
+    if anchor is None:
+        if sorted_before:
+            logger.info(
+                "Channel watch window has no overlap with the previous sorted "
+                "list; delivering the fetched window"
+            )
+            return _collect_unnotified(entries, notified, pending_ids)
+        logger.info(
+            "Channel watch window has no overlap with the previous list; "
+            "seeding without delivering"
+        )
+        for entry in entries:
+            notified.add(entry['video_id'])
+        return []
+
+    fresh = list(entries[:anchor])
+    anchor_entry = entries[anchor]
+    anchor_id = anchor_entry['video_id']
+    if anchor_id in seen_set and anchor_id not in notified:
+        fresh.append(anchor_entry)
+    else:
+        notified.add(anchor_id)
+    for entry in entries[anchor + 1:]:
+        notified.add(entry['video_id'])
+    return _collect_unnotified(fresh, notified, pending_ids)
+
+
 def check_subscription_for_new_videos(sub: dict):
     """מחזיר (updated_sub, new_entries). בלי שליחה.
 
-    זיהוי לפי סט ID-ים (notified + חלון seen), לא לפי מצביע בראש הרשימה.
-    ID חדש נכנס ל-notified רק אחרי שליחה מוצלחת ב-run_check.
+    הרשימה ממוינת מהחדש לישן (פלייליסט UULF/UUSH). נשלח רק ID-ים שמעל
+    משהו שכבר ראינו. ID חדש נכנס ל-notified רק אחרי שליחה מוצלחת ב-run_check.
     """
     notified = set(sub.get('notified_video_ids') or [])
     new_entries = []
     pending_ids = set()
+    channel_id = sub.get('channel_id') or ''
     for source_key in sub.get('sources') or ['videos']:
         try:
             with track_ytdlp_metadata():
-                entries = fetch_source_entries(sub['channel_url'], source_key)
+                entries = fetch_source_entries(
+                    sub['channel_url'], source_key, channel_id=channel_id
+                )
         except Exception as e:
             logger.warning(
                 f"Channel watch fetch failed for {sub.get('channel_label')} "
@@ -586,34 +658,35 @@ def check_subscription_for_new_videos(sub: dict):
         ids = [entry['video_id'] for entry in entries]
         last_seen = src_state.get('last_seen_video_id')
         seen = src_state.get('seen_video_ids') or []
+        used_uploads = uploads_playlist_url(channel_id, source_key) is not None
+        sorted_before = src_state.get('list_order') == 'uploads' and used_uploads
 
         if not last_seen and not seen:
             notified.update(ids)
-            _snapshot_source(src_state, entries)
-            continue
-
-        if not seen:
+        elif not seen:
             # מנוי ישן בלי חלון seen: מיגרציה חד-פעמית מהמצביע.
-            current_ids = set(ids)
-            if last_seen not in current_ids:
+            if last_seen not in set(ids):
                 logger.info(
                     f"Channel watch last_seen missing for "
                     f"{sub.get('channel_label')} /{source_key}; "
                     "seeding window without delivering"
                 )
                 notified.update(ids)
-                _snapshot_source(src_state, entries)
-                continue
-            found = find_new_entries(entries, last_seen)
-            found_ids = {entry['video_id'] for entry in found}
-            for video_id in ids:
-                if video_id not in found_ids:
-                    notified.add(video_id)
-            new_entries.extend(_collect_unnotified(found, notified, pending_ids))
+            else:
+                found = find_new_entries(entries, last_seen)
+                found_ids = {entry['video_id'] for entry in found}
+                for video_id in ids:
+                    if video_id not in found_ids:
+                        notified.add(video_id)
+                new_entries.extend(_collect_unnotified(found, notified, pending_ids))
         else:
-            new_entries.extend(_collect_unnotified(entries, notified, pending_ids))
+            new_entries.extend(_select_new_on_sorted_list(
+                entries, seen, notified, pending_ids, sorted_before
+            ))
 
         _snapshot_source(src_state, entries)
+        if used_uploads:
+            src_state['list_order'] = 'uploads'
 
     sub['notified_video_ids'] = list(notified)
     return sub, new_entries

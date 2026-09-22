@@ -269,6 +269,7 @@ def _empty_source_state():
         'last_seen_video_id': None,
         'last_seen_title': None,
         'seen_video_ids': [],
+        'list_order': None,
     }
 
 
@@ -278,6 +279,7 @@ def _normalize_source_state(src) -> dict:
     normalized = dict(src)
     normalized.setdefault('last_seen_video_id', None)
     normalized.setdefault('last_seen_title', None)
+    normalized.setdefault('list_order', None)
     seen = normalized.get('seen_video_ids')
     if not isinstance(seen, list):
         normalized['seen_video_ids'] = []
