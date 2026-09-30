@@ -74,6 +74,10 @@ SUPPORTED_SITES_MESSAGE = (
     "אני תומך בהורדה מיוטיוב, טוויטר, טיקטוק, אינסטגרם, פייסבוק, "
     "לינקדאין, פינטרסט, רדיט, וימאו, ואולי גם מעוד אתרי וידאו מוכרים, שווה לנסות 😊"
 )
+
+# הודעה שהטקסט שלה הוא רק האמוג'י הזה. הלקוח של טלגרם מנגן לבד
+# את ההנפשה הגדולה המובנית — אין פרמטר מיוחד ב-API.
+WAITING_HOURGLASS_EMOJI = "⏳"
 VERSIONS_URL = "https://github.com/pilpel1/TG-bot-YTDL/blob/main/VERSIONS.md"
 
 # מגביל כמה entries נשלפים בזיהוי הראשוני של פלייליסט/מיקס.
@@ -1262,16 +1266,57 @@ async def maybe_prompt_batch_count(message, context, url, selected_option, quali
     return True
 
 
-async def show_youtube_download_options(message, context, url):
-    """מציג את אפשרויות הווידאו ליוטיוב אחרי לחיצה על וידאו."""
+def youtube_download_options_ready(context, url):
+    """True רק אם ה-prefetch של אותו URL כבר הסתיים ואפשר להציג איכויות מיד."""
     prefetch_task = context.user_data.get('youtube_prefetch_task')
     prefetched_url = context.user_data.get('youtube_prefetch_url')
+    return bool(
+        prefetch_task is not None
+        and prefetched_url == url
+        and prefetch_task.done()
+    )
+
+
+async def send_waiting_hourglass(bot, chat_id):
+    """שולח ⏳ בהודעה לבד. אם השליחה נכשלת — ממשיכים בלי אנימציה."""
+    try:
+        return await bot.send_message(
+            chat_id=chat_id,
+            text=WAITING_HOURGLASS_EMOJI,
+            disable_notification=True,
+        )
+    except Exception as e:
+        logger.warning(f"Could not send waiting hourglass: {e}")
+        return None
+
+
+async def delete_waiting_hourglass(hourglass_message):
+    if hourglass_message is None:
+        return
+    try:
+        await hourglass_message.delete()
+    except Exception as e:
+        logger.warning(f"Could not delete waiting hourglass: {e}")
+
+
+async def show_youtube_download_options(message, context, url):
+    """מציג את אפשרויות הווידאו ליוטיוב אחרי לחיצה על וידאו.
+
+    שעון החול נשלח רק כשבאמת מחכים לאיכויות (פעם אחת לבקשה, לא לכל
+    סרטון בפלייליסט). אם ה-prefetch כבר מוכן — אין הודעה מיותרת.
+    """
     context.user_data['youtube_prefetch_waiting_for_choice'] = False
 
-    if prefetch_task and prefetched_url == url and not prefetch_task.done():
+    hourglass_message = None
+    if not youtube_download_options_ready(context, url):
         await message.edit_text('בודק איכויות זמינות וגודל משוער... ⏳')
+        hourglass_message = await send_waiting_hourglass(context.bot, message.chat_id)
 
-    prefetched_result = await get_youtube_download_options_result(context, url)
+    try:
+        prefetched_result = await get_youtube_download_options_result(context, url)
+    finally:
+        await delete_waiting_hourglass(hourglass_message)
+
     download_options = prefetched_result['download_options']
     prompt = prefetched_result['prompt']
 

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import pytest
 import yt_dlp
@@ -7,6 +8,7 @@ from telegram.ext import ContextTypes
 from bot_handlers import (
     is_valid_url, is_preferred_platform, is_thank_you_message, is_searchable_text,
     start, ask_format, button_click, handle_thank_you, stop_download, search_mode,
+    show_youtube_download_options, WAITING_HOURGLASS_EMOJI,
     help_command, channels_command, build_search_results_keyboard, build_bot_commands,
     build_channel_edit_keyboard, build_channels_list_text,
 )
@@ -639,6 +641,127 @@ async def test_button_click_video_youtube(mock_update, mock_context):
         mock_context,
         'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
     )
+
+
+def _quality_prefetch_result():
+    return {
+        'download_options': [build_youtube_quality_option(720)],
+        'prompt': 'בחר מה להוריד:',
+    }
+
+
+@pytest.mark.asyncio
+async def test_video_quality_wait_sends_hourglass_and_deletes_it(mock_context):
+    message = MagicMock()
+    message.chat_id = 123456789
+    message.edit_text = AsyncMock()
+    url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_prefetch():
+        started.set()
+        await release.wait()
+        return _quality_prefetch_result()
+
+    task = asyncio.create_task(slow_prefetch())
+    await started.wait()
+    mock_context.user_data = {
+        'youtube_prefetch_task': task,
+        'youtube_prefetch_url': url,
+        'youtube_prefetch_waiting_for_choice': True,
+    }
+    hourglass = MagicMock()
+    hourglass.delete = AsyncMock()
+    mock_context.bot.send_message = AsyncMock(return_value=hourglass)
+
+    show_task = asyncio.create_task(
+        show_youtube_download_options(message, mock_context, url)
+    )
+    await asyncio.sleep(0)
+
+    mock_context.bot.send_message.assert_awaited_once_with(
+        chat_id=123456789,
+        text=WAITING_HOURGLASS_EMOJI,
+        disable_notification=True,
+    )
+    hourglass.delete.assert_not_awaited()
+    message.edit_text.assert_awaited_once_with('בודק איכויות זמינות וגודל משוער... ⏳')
+
+    release.set()
+    await show_task
+
+    hourglass.delete.assert_awaited_once()
+    assert message.edit_text.await_count == 2
+    assert mock_context.user_data['youtube_prefetch_waiting_for_choice'] is False
+    assert mock_context.user_data['youtube_download_options'][0]['quality_name'] == '720p'
+
+
+@pytest.mark.asyncio
+async def test_video_quality_ready_skips_hourglass(mock_context):
+    message = MagicMock()
+    message.chat_id = 123456789
+    message.edit_text = AsyncMock()
+    url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+
+    async def ready_prefetch():
+        return _quality_prefetch_result()
+
+    task = asyncio.create_task(ready_prefetch())
+    await task
+    mock_context.user_data = {
+        'youtube_prefetch_task': task,
+        'youtube_prefetch_url': url,
+    }
+    mock_context.bot.send_message = AsyncMock()
+
+    await show_youtube_download_options(message, mock_context, url)
+
+    mock_context.bot.send_message.assert_not_awaited()
+    message.edit_text.assert_awaited_once()
+    assert 'בחר מה להוריד:' in message.edit_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_video_quality_wait_deletes_hourglass_when_fetch_fails(mock_context):
+    message = MagicMock()
+    message.chat_id = 123456789
+    message.edit_text = AsyncMock()
+    url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+    mock_context.user_data = {}
+    hourglass = MagicMock()
+    hourglass.delete = AsyncMock()
+    mock_context.bot.send_message = AsyncMock(return_value=hourglass)
+
+    with patch(
+        'bot_handlers.get_youtube_download_options_result',
+        new=AsyncMock(side_effect=RuntimeError('yt-dlp down')),
+    ):
+        with pytest.raises(RuntimeError, match='yt-dlp down'):
+            await show_youtube_download_options(message, mock_context, url)
+
+    hourglass.delete.assert_awaited_once()
+    message.edit_text.assert_awaited_once_with('בודק איכויות זמינות וגודל משוער... ⏳')
+
+
+@pytest.mark.asyncio
+async def test_video_quality_wait_continues_if_hourglass_send_fails(mock_context):
+    message = MagicMock()
+    message.chat_id = 123456789
+    message.edit_text = AsyncMock()
+    url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+    mock_context.user_data = {}
+    mock_context.bot.send_message = AsyncMock(side_effect=RuntimeError('telegram down'))
+
+    with patch(
+        'bot_handlers.get_youtube_download_options_result',
+        new=AsyncMock(return_value=_quality_prefetch_result()),
+    ):
+        await show_youtube_download_options(message, mock_context, url)
+
+    assert message.edit_text.await_count == 2
+    assert 'בחר מה להוריד:' in message.edit_text.await_args.args[0]
 
 
 @pytest.mark.asyncio
