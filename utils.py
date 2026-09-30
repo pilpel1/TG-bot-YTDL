@@ -222,28 +222,19 @@ def search_youtube(query, limit=5):
     return results
 
 
-def format_search_result_button_text(index, result):
-    """בונה טקסט קצר לכפתור inline של תוצאת חיפוש (מגבלת 64 תווים של טלגרם)."""
-    title = (result.get('title') or 'ללא כותרת').strip()
-    if len(title) > 35:
-        title = f'{title[:32]}...'
-
-    label = f'{index + 1}. {title}'
-    suffix_parts = []
-    uploader = (result.get('uploader') or '').strip()
-    if uploader:
-        if len(uploader) > 15:
-            uploader = f'{uploader[:12]}...'
-        suffix_parts.append(uploader)
-
-    duration = format_duration_short(result.get('duration'))
-    if duration:
-        suffix_parts.append(duration)
-
-    if suffix_parts:
-        label = f'{label} ({", ".join(suffix_parts)})'
-
-    return label[:64]
+def format_search_results_message(query, results):
+    """כותרות מלאות בגוף ההודעה. כפתור inline מוגבל ל-64 תווים אז אי אפשר לשים שם את השם המלא."""
+    blocks = []
+    for index, result in enumerate(results):
+        title = (result.get('title') or 'ללא כותרת').replace('\n', ' ').strip()
+        uploader = (result.get('uploader') or '').replace('\n', ' ').strip()
+        duration = format_duration_short(result.get('duration'))
+        meta = ' · '.join(part for part in (uploader, duration) if part)
+        block = f'{index + 1}. {title}'
+        if meta:
+            block += f'\n{meta}'
+        blocks.append(block)
+    return f'תוצאות חיפוש עבור "{query}":\n\n' + '\n\n'.join(blocks) + '\n\nבחר מספר:'
 
 
 def build_youtube_quality_option(height):

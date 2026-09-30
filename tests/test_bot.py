@@ -30,7 +30,7 @@ from utils import (
     format_file_size,
     search_youtube,
     format_duration_short,
-    format_search_result_button_text,
+    format_search_results_message,
 )
 
 # Fixtures
@@ -484,19 +484,30 @@ def test_format_duration_short():
     assert format_duration_short(65) == '1:05'
     assert format_duration_short(3661) == '1:01:01'
 
-def test_format_search_result_button_text_truncates_long_title():
+def test_format_search_results_message_keeps_full_title():
+    title = 'איך לנקות מכונת כביסה בלי לקצר את השם באמצע'
     result = {
-        'title': 'A' * 50,
-        'uploader': 'Artist Name Here',
-        'duration': 125,
+        'title': title,
+        'uploader': 'צביקה דפציגר',
+        'duration': 220,
     }
-    label = format_search_result_button_text(0, result)
-    assert label.startswith('1.')
-    assert len(label) <= 64
+    text = format_search_results_message('מכונת כביסה', [result])
+    assert title in text
+    assert '...' not in text
+    assert 'צביקה דפציגר' in text
+    assert '3:40' in text
+    assert text.startswith('תוצאות חיפוש עבור "מכונת כביסה":')
+    assert text.endswith('בחר מספר:')
 
 def test_build_search_results_keyboard_has_cancel():
-    results = [{'title': 'Song', 'uploader': 'Artist', 'duration': 60}]
+    results = [
+        {'title': 'Song', 'uploader': 'Artist', 'duration': 60},
+        {'title': 'Other', 'uploader': 'B', 'duration': 30},
+    ]
     keyboard = build_search_results_keyboard(results)
+    number_row = keyboard.inline_keyboard[0]
+    assert [button.text for button in number_row] == ['1', '2']
+    assert [button.callback_data for button in number_row] == ['search_pick_0', 'search_pick_1']
     last_row = keyboard.inline_keyboard[-1]
     assert last_row[0].callback_data == 'cancel'
 

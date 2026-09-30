@@ -29,6 +29,18 @@
 - Docker (לשרת Local Bot API)
 - חשבון טלגרם לקבלת API credentials
 
+### שרת Linux חדש
+
+מתוך הריפו, **כיוזר שיריץ את הבוט** (לא root):
+
+```bash
+bash scripts/linux/setup_server.sh
+```
+
+שואל בהתחלה רק את מה שחייב: טוקן, האם מצב 2GB (ואז `api_id` ו-`api_hash` מ-[my.telegram.org](https://my.telegram.org)), ואם להדליק את systemd. אחר כך מתקין לבד FFmpeg, venv, Deno, ובמצב 2GB גם Docker. `--yes` עונה כן על שאלות כן/לא; טוקן עדיין חובה (קובץ `.env` קיים, או `SETUP_BOT_TOKEN`).
+
+השלבים למטה נשארים ל-Windows ולמי שמתקין בלי הסקריפט.
+
 ### שלבי ההתקנה
 
 1. שכפל את המאגר:
@@ -79,7 +91,7 @@ ffmpeg -version
 
 5. **Deno (אופציונלי, מומלץ לפרודקשן יוטיוב):**
 
-הקוד לא בודק ולא דורש Deno. אם הוא מותקן — yt-dlp מוצא אותו לבד (ברירת מחדל). בלי זה הבוט עובד, אבל יוטיוב בלי מנוע JS מחביא פורמטים: אזהרת `No supported JavaScript runtime`, וכשלונות בעיקר בוידאו. לא מאיץ הורדות.
+הבוט רץ בלי Deno. בהפעלה הוא כן בודק אם `deno` ב-PATH: חסר → אזהרה `Deno not found - yt-dlp will fall back to its built-in JS interpreter`, ו-`/status` מציג `Deno: לא מותקן`. אם מותקן — yt-dlp מוצא אותו לבד (הבוט לא מעביר נתיב). בלי זה yt-dlp נופל למפרש ה-JS הפנימי שלו, שאיטי יותר ונשבר מוקדם יותר באתגרי יוטיוב.
 
 אם מתקינים — **כאותו יוזר שמריץ את הבוט** (לא root):
 
@@ -87,7 +99,8 @@ ffmpeg -version
 # מי מריץ את הסרוויס:
 systemctl show -p User --value tg-bot-ytdl
 
-curl -fsSL https://deno.land/install.sh | sh
+# -y מדלג על "Edit shell configs to add deno to the PATH?" ועונה כן
+curl -fsSL https://deno.land/install.sh | sh -s -- -y
 source ~/.bashrc
 deno --version
 ```

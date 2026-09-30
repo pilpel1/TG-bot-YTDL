@@ -55,7 +55,7 @@ from utils import (
     is_youtube_playlist_url,
     count_playlist_entries,
     search_youtube,
-    format_search_result_button_text,
+    format_search_results_message,
 )
 import asyncio
 import random
@@ -328,14 +328,11 @@ def build_unrecognized_input_message(search_mode_on: bool = False) -> str:
 
 
 def build_search_results_keyboard(results):
-    """בונה מקלדת עם תוצאות חיפוש יוטיוב."""
-    keyboard = [
-        [InlineKeyboardButton(
-            format_search_result_button_text(index, result),
-            callback_data=f'search_pick_{index}'
-        )]
-        for index, result in enumerate(results)
-    ]
+    """כפתורי מספר בלבד — הטקסט המלא יושב בהודעה (מגבלת 64 תווים לכפתור)."""
+    keyboard = [[
+        InlineKeyboardButton(str(index + 1), callback_data=f'search_pick_{index}')
+        for index in range(len(results))
+    ]]
     keyboard.append([InlineKeyboardButton("❌ ביטול", callback_data='cancel')])
     return InlineKeyboardMarkup(keyboard)
 
@@ -365,7 +362,7 @@ async def handle_youtube_text_search(message, context, query):
     context.user_data['youtube_search_results'] = results
     context.user_data['youtube_search_query'] = query
     await status_message.edit_text(
-        f'תוצאות חיפוש עבור "{query}":\nבחר סרטון:',
+        format_search_results_message(query, results),
         reply_markup=build_search_results_keyboard(results),
     )
 
