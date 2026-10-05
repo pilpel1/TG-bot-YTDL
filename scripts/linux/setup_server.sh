@@ -1,7 +1,10 @@
 #!/bin/bash
 # Fresh Debian/Ubuntu server setup for this repo.
 # Asks for the bot token, whether to enable 2GB mode, and whether to
-# start systemd. Then installs FFmpeg, a venv, Deno, and (for 2GB) Docker.
+# start systemd. Stops if RAM or free disk cannot fit the install.
+# Warns (and asks) if they are below the recommended working minimum,
+# then installs FFmpeg, a venv, Deno, and (for 2GB) Docker.
+# --yes does not override the install minimum.
 #
 # Run as the user that should own the bot, not as root:
 #   bash scripts/linux/setup_server.sh
@@ -21,7 +24,7 @@ for arg in "$@"; do
     case "$arg" in
         -y|--yes) ASSUME_YES=1 ;;
         -h|--help)
-            sed -n '2,12p' "$0"
+            sed -n '2,15p' "$0"
             exit 0
             ;;
         *)
@@ -125,6 +128,94 @@ upsert_env_key() {
     mv "$tmp" .env
 }
 
+# Install floor: venv + Deno, plus apt scratch. 2GB mode also pulls
+# docker.io and the Local API image. Below this, the install itself fails.
+# Recommended is higher and not required: one download keeps the source
+# and the output on disk together (about 2x the file that gets sent).
+INSTALL_RAM_MIB_50MB=256
+INSTALL_DISK_MIB_50MB=1024
+INSTALL_RAM_MIB_2GB=512
+INSTALL_DISK_MIB_2GB=2048
+RECOMMENDED_RAM_MIB_50MB=1024
+RECOMMENDED_DISK_MIB_50MB=2048
+RECOMMENDED_RAM_MIB_2GB=2048
+RECOMMENDED_DISK_MIB_2GB=6144
+RESOURCE_WARNINGS=0
+RESOURCE_BLOCKS=0
+
+read_mem_total_mib() {
+    awk '/^MemTotal:/ { printf "%d", $2 / 1024 }' /proc/meminfo 2>/dev/null || true
+}
+
+read_disk_free_mib() {
+    { df -Pk "$1" | awk 'NR==2 { printf "%d", $4 / 1024 }'; } 2>/dev/null || true
+}
+
+check_resources() {
+    local install_ram install_disk rec_ram rec_disk ram_mib disk_mib
+    RESOURCE_WARNINGS=0
+    RESOURCE_BLOCKS=0
+    if [ "$ENABLE_2GB" -eq 1 ]; then
+        install_ram=$INSTALL_RAM_MIB_2GB
+        install_disk=$INSTALL_DISK_MIB_2GB
+        rec_ram=$RECOMMENDED_RAM_MIB_2GB
+        rec_disk=$RECOMMENDED_DISK_MIB_2GB
+    else
+        install_ram=$INSTALL_RAM_MIB_50MB
+        install_disk=$INSTALL_DISK_MIB_50MB
+        rec_ram=$RECOMMENDED_RAM_MIB_50MB
+        rec_disk=$RECOMMENDED_DISK_MIB_50MB
+    fi
+
+    ram_mib="$(read_mem_total_mib)"
+    disk_mib="$(read_disk_free_mib "$PROJECT_DIR")"
+
+    echo "Resource check (recommended is not required):"
+    if [ -z "$ram_mib" ]; then
+        echo "  RAM: could not read /proc/meminfo"
+        RESOURCE_WARNINGS=$((RESOURCE_WARNINGS + 1))
+    elif [ "$ram_mib" -lt "$install_ram" ]; then
+        echo "  RAM: ${ram_mib} MiB (install ${install_ram}, recommended ${rec_ram}) TOO LOW"
+        RESOURCE_BLOCKS=$((RESOURCE_BLOCKS + 1))
+    elif [ "$ram_mib" -lt "$rec_ram" ]; then
+        echo "  RAM: ${ram_mib} MiB (install ${install_ram}, recommended ${rec_ram}) below recommended"
+        RESOURCE_WARNINGS=$((RESOURCE_WARNINGS + 1))
+    else
+        echo "  RAM: ${ram_mib} MiB (install ${install_ram}, recommended ${rec_ram}) ok"
+    fi
+
+    if [ -z "$disk_mib" ]; then
+        echo "  Disk: could not read free space on $PROJECT_DIR"
+        RESOURCE_WARNINGS=$((RESOURCE_WARNINGS + 1))
+    elif [ "$disk_mib" -lt "$install_disk" ]; then
+        echo "  Disk: ${disk_mib} MiB free on $PROJECT_DIR (install ${install_disk}, recommended ${rec_disk}) TOO LOW"
+        RESOURCE_BLOCKS=$((RESOURCE_BLOCKS + 1))
+    elif [ "$disk_mib" -lt "$rec_disk" ]; then
+        echo "  Disk: ${disk_mib} MiB free on $PROJECT_DIR (install ${install_disk}, recommended ${rec_disk}) below recommended"
+        RESOURCE_WARNINGS=$((RESOURCE_WARNINGS + 1))
+    else
+        echo "  Disk: ${disk_mib} MiB free on $PROJECT_DIR (install ${install_disk}, recommended ${rec_disk}) ok"
+    fi
+
+    if [ "$RESOURCE_BLOCKS" -gt 0 ]; then
+        echo "ERROR: below the install minimum. apt, the venv, Deno, or Docker will fail."
+        return
+    fi
+
+    if [ "$RESOURCE_WARNINGS" -gt 0 ]; then
+        echo "WARNING: below the recommended minimum. Install can finish, and the bot can run."
+        if [ "$ENABLE_2GB" -eq 1 ]; then
+            echo "One download keeps the source and the output on disk at once (about 2x the file you send)."
+            echo "A 1.5 GiB audio needs about 3 GiB free during that download, even though Telegram can send 1.5 GiB."
+            if [ -z "$disk_mib" ] || [ "$disk_mib" -lt "$rec_disk" ]; then
+                echo "Edge case, does not block install: if no direct audio stream exists, a fallback can download the full video and extract audio from it. That needs room for the video, not just the m4a."
+            fi
+        else
+            echo "Files are capped at 50MB. This warning is headroom for apt, ffmpeg, and the venv, not for a large file."
+        fi
+    fi
+}
+
 if [ "$(id -u)" -eq 0 ]; then
     die "Do not run as root. Deno and the bot must belong to the normal user:
   bash scripts/linux/setup_server.sh"
@@ -220,13 +311,37 @@ if [ "$ENABLE_2GB" -eq 1 ]; then
 fi
 
 echo
+check_resources
+echo
 echo "Summary before changes:"
 echo "  Mode: $([ "$ENABLE_2GB" -eq 1 ] && echo '2GB' || echo '50MB')"
 echo "  .env: $([ "$WRITE_ENV" -eq 1 ] && echo 'will be written' || echo 'left as-is')"
 if [ "$ENABLE_2GB" -eq 1 ] && have_systemd; then
     echo "  systemd: $([ "$START_SERVICES" -eq 1 ] && echo 'install and start' || echo 'install only, do not start')"
 fi
+if [ "$RESOURCE_BLOCKS" -gt 0 ]; then
+    echo "  Resources: too low to install"
+elif [ "$RESOURCE_WARNINGS" -gt 0 ]; then
+    echo "  Resources: below recommended"
+else
+    echo "  Resources: ok"
+fi
 echo
+
+if [ "$RESOURCE_BLOCKS" -gt 0 ]; then
+    echo "Stopped. Nothing was installed."
+    exit 1
+fi
+
+if [ "$RESOURCE_WARNINGS" -gt 0 ]; then
+    if [ "$ASSUME_YES" -eq 1 ] || [ ! -t 0 ]; then
+        echo "Continuing below the recommended minimum."
+        echo
+    elif ! ask_yes "Continue anyway? [y/N]" n; then
+        echo "Stopped. Nothing was installed."
+        exit 1
+    fi
+fi
 
 sudo -v
 

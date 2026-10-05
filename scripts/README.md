@@ -30,7 +30,7 @@ scripts/
 ### סקריפטים עיקריים:
 - **`run_bot_advanced_2GB.sh`** - מסלול ה-2GB הרשמי: מרים Local API ב-WSL, ממתין ל-readiness, ואז מפעיל את הבוט
 - **`run_bot_simple_50MB.sh`** - הפעלת בוט פשוטה (תמיד 50MB)
-- **`setup_server.sh`** - התקנה על שרת Debian/Ubuntu חדש: שואל טוקן / 2GB / הדלקת systemd, ומתקין FFmpeg, venv, Deno, ובמצב 2GB גם Docker. לא להריץ כ-root
+- **`setup_server.sh`** - התקנה על שרת Debian/Ubuntu חדש: שואל טוקן / 2GB / הדלקת systemd, עוצר אם אין דיסק או RAM להתקנה, מתריע אם מתחת למומלץ, ומתקין FFmpeg, venv, Deno, ובמצב 2GB גם Docker. לא להריץ כ-root
 - **`install_systemd.sh`** - מזהה נתיב פרויקט + יוזר, וכותב את יחידות systemd ל-`/etc` (לא לשמור נתיב אישי בגיט). אחרי שינוי ב-`deploy/systemd/` חובה להריץ שוב — `restart` לא מעתיק את הקבצים
 - **`run_bot_service.sh`** - הפעלת פרודקשן ל-systemd (ממתין ל-Local API, מעדכן yt-dlp אם יש סימון, ואם קיים `~/.deno/bin` מוסיף אותו ל-PATH, מריץ את הבוט)
 - **`run_local_api_service.sh`** - Local API ב-foreground ל-systemd (עם volume קבוע)
