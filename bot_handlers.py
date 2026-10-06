@@ -13,6 +13,7 @@ from config import (
     YOUTUBE_SEARCH_MAX_QUERY_LENGTH,
     MAINTENANCE_USER_MESSAGE,
     CHANNEL_WATCH_MAX_PER_USER,
+    LIVE_WAIT_HOURS,
 )
 from download_manager import download_with_quality, download_playlist
 from download_queue import CancellationToken
@@ -45,8 +46,14 @@ from channel_watch import (
 )
 from broadcast import is_admin, list_broadcast_targets, run_broadcast
 from runtime_status import build_status_text
+from live_wait import (
+    cancel_live_waits_for_chat,
+    check_interval_he,
+    live_snapshot_from_info,
+    maybe_register_live_wait,
+)
 from utils import (
-    fetch_youtube_download_options,
+    fetch_youtube_download_bundle,
     build_youtube_audio_option,
     get_best_allowed_quality_name,
     fetch_youtube_basic_info,
@@ -148,14 +155,32 @@ async def remember_incoming(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def stop_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """פקודת /stop - מבטלת את ההורדה הפעילה/הממתינה בתור של המשתמש הזה, אם יש."""
+    """פקודת /stop - מבטלת הורדה בתור וגם המתנה ללייב של המשתמש הזה."""
     chat_id = update.effective_chat.id
+    cancelled_waits = cancel_live_waits_for_chat(chat_id)
+    if cancelled_waits:
+        live_manager = context.bot_data.get('live_wait')
+        if live_manager is not None and hasattr(live_manager, 'wake'):
+            live_manager.wake()
+
     download_queue = context.bot_data.get('download_queue')
     if not download_queue:
+        if cancelled_waits:
+            await update.message.reply_text('ביטלתי את ההמתנה ללייב 🛑')
+            return
         await update.message.reply_text('אין תור הורדות פעיל כרגע.')
         return
 
     cancelled_count = download_queue.cancel_all_for_chat(chat_id)
+    if cancelled_count and cancelled_waits:
+        await update.message.reply_text('ביטלתי את ההורדה וגם את ההמתנה ללייב 🛑')
+        return
+    if cancelled_waits:
+        if cancelled_waits == 1:
+            await update.message.reply_text('ביטלתי את ההמתנה ללייב 🛑')
+        else:
+            await update.message.reply_text(f'ביטלתי {cancelled_waits} המתנות ללייב 🛑')
+        return
     if cancelled_count == 0:
         await update.message.reply_text('אין לך הורדה פעילה או ממתינה כרגע 🤷')
         return
@@ -263,7 +288,7 @@ def build_bot_commands(search_mode_on: bool = False, include_admin: bool = False
         BotCommand('help', 'עזרה, פקודות ומגבלת קבצים'),
         BotCommand('search_mode', search_desc),
         BotCommand('channels', 'מעקב אחרי ערוצי יוטיוב'),
-        BotCommand('stop', 'ביטול הורדה פעילה או ממתינה'),
+        BotCommand('stop', 'ביטול הורדה או המתנה ללייב'),
         BotCommand('version', 'גרסה נוכחית ושינויים'),
     ]
     if include_admin:
@@ -915,6 +940,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f'{SUPPORTED_SITES_MESSAGE}\n\n'
         'איך משתמשים:\n'
         '• שלח קישור — אשאל אודיו/וידאו (וביוטיוב גם איכות)\n'
+        f'• לייב שעוד לא עלה — אחרי הבחירה אבדוק {check_interval_he()} עד {LIVE_WAIT_HOURS} שעות, ואוריד כשאפשר\n'
         '• חיפוש לפי שם שיר/אמן — הפעל /search_mode ואז שלח טקסט\n'
         f'• מעקב ערוץ יוטיוב — /channels ({format_watch_schedule_he()}, לא מיידי)\n'
         '• אם יש קישור בהודעה, אתייחס רק אליו\n\n'
@@ -924,7 +950,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '/search_mode — הפעלה/כיבוי חיפוש טקסט (כרגע: '
         f'{search_status})\n'
         '/channels — מעקב אחרי ערוצי יוטיוב\n'
-        '/stop — ביטול הורדה פעילה או ממתינה בתור\n'
+        '/stop — ביטול הורדה פעילה, או המתנה ללייב\n'
         '/version — גרסה נוכחית ושינויים\n\n'
         f'{build_file_limit_summary()}'
     )
@@ -1151,24 +1177,29 @@ async def _prefetch_youtube_download_options(url):
         }
 
     download_options = []
+    live = None
     try:
-        download_options = await asyncio.to_thread(
-            fetch_youtube_download_options,
+        bundle = await asyncio.to_thread(
+            fetch_youtube_download_bundle,
             url,
             MAX_FILE_SIZE
         )
+        download_options = bundle['download_options']
+        live = live_snapshot_from_info(bundle.get('info'))
     except Exception as e:
         logger.warning(f"Could not fetch dynamic YouTube download options: {e}")
 
     if not download_options:
         return {
             'download_options': build_fallback_youtube_download_options(),
-            'prompt': 'לא הצלחתי לזהות את כל האיכויות הזמינות כרגע.\nבחר מה להוריד:'
+            'prompt': 'לא הצלחתי לזהות את כל האיכויות הזמינות כרגע.\nבחר מה להוריד:',
+            'live': live,
         }
 
     return {
         'download_options': download_options,
-        'prompt': 'בחר מה להוריד:'
+        'prompt': 'בחר מה להוריד:',
+        'live': live,
     }
 
 
@@ -1488,6 +1519,13 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ):
             return
 
+        if await maybe_register_live_wait(
+            query.message, context, url, download_mode, selected_option
+        ):
+            context.user_data.pop('youtube_prefetch_task', None)
+            context.user_data.pop('youtube_prefetch_url', None)
+            return
+
         context.user_data.pop('youtube_prefetch_task', None)
         context.user_data.pop('youtube_prefetch_url', None)
         status_message = await query.message.edit_text('מעבד את הבקשה... ⏳')
@@ -1523,6 +1561,13 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if is_youtube and await maybe_prompt_batch_count(
                 query.message, context, current_url, quality, None
             ):
+                return
+
+            if is_youtube and await maybe_register_live_wait(
+                query.message, context, current_url, download_mode, quality
+            ):
+                context.user_data.pop('youtube_prefetch_task', None)
+                context.user_data.pop('youtube_prefetch_url', None)
                 return
 
             context.user_data.pop('youtube_prefetch_task', None)

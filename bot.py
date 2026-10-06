@@ -17,6 +17,7 @@ from cache_metadata_backfill import run_backfill_in_background
 from download_queue import DownloadQueue
 from ytdlp_updater import YtdlpUpdateManager
 from channel_watch import ChannelWatchManager
+from live_wait import LiveWaitManager
 from runtime_status import mark_runtime_start
 
 
@@ -36,6 +37,10 @@ async def post_init(application):
     channel_watch = ChannelWatchManager(application)
     channel_watch.start()
     application.bot_data['channel_watch'] = channel_watch
+
+    live_wait = LiveWaitManager(application)
+    live_wait.start()
+    application.bot_data['live_wait'] = live_wait
 
     # השלמת תיאורים לרשומות cache ישנות. רץ ברקע (ב-thread נפרד) כדי לא
     # לעכב את ה-polling, ומסיים מיד כשאין מה להשלים - כלומר אחרי ההרצה
@@ -69,6 +74,11 @@ async def post_stop(application):
     if channel_watch:
         await channel_watch.stop()
         logger.info("Channel watch stopped")
+
+    live_wait = application.bot_data.get('live_wait')
+    if live_wait:
+        await live_wait.stop()
+        logger.info("Live wait stopped")
 
     download_queue = application.bot_data.get('download_queue')
     if download_queue:

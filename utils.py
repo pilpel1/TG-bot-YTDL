@@ -620,8 +620,11 @@ def build_download_option_button_text(option, best_allowed_quality_name=None):
     return f"{prefix}{option['quality_name']} • {size_label}{suffix}"
 
 
-def fetch_youtube_download_options(url, max_file_size):
-    """שולף אפשרויות הורדה ליוטיוב עם גודל משוער וחסימה לפי מגבלה."""
+def fetch_youtube_download_bundle(url, max_file_size):
+    """שולף פעם אחת metadata מלא: אפשרויות הורדה + השדות שצריך לזיהוי לייב.
+
+    info נשאר כדי שהקורא יזהה is_live/live_status בלי extract נוסף.
+    """
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
@@ -634,9 +637,17 @@ def fetch_youtube_download_options(url, max_file_size):
         info = ydl.extract_info(url, download=False)
 
     if not info or 'entries' in info:
-        return []
+        return {'download_options': [], 'info': info}
 
-    return build_youtube_download_options_from_info(info, max_file_size)
+    return {
+        'download_options': build_youtube_download_options_from_info(info, max_file_size),
+        'info': info,
+    }
+
+
+def fetch_youtube_download_options(url, max_file_size):
+    """שולף אפשרויות הורדה ליוטיוב עם גודל משוער וחסימה לפי מגבלה."""
+    return fetch_youtube_download_bundle(url, max_file_size)['download_options']
 
 async def safe_edit_message(message, text, retries=3):
     """Helper function to safely edit messages with retries"""

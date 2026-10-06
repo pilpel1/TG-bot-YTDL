@@ -149,13 +149,19 @@ CHANNEL_WATCH_FETCH_LIMIT = _env_int('CHANNEL_WATCH_FETCH_LIMIT', 20)
 CHANNEL_WATCH_MAX_PER_USER = _env_int('CHANNEL_WATCH_MAX_PER_USER', 10)
 CHANNEL_WATCH_NOTIFIED_CAP = _env_int('CHANNEL_WATCH_NOTIFIED_CAP', 200)
 
+# המתנה ללייב/פרימיירה שעוד אין מה להוריד. נשמר ב-data/ ושורד ריסטארט
+# (כולל הכיבוי הלילי של עדכון yt-dlp).
+LIVE_WAIT_HOURS = _env_int('LIVE_WAIT_HOURS', 48)
+LIVE_WAIT_CHECK_SECONDS = _env_int('LIVE_WAIT_CHECK_SECONDS', 3600)
+
 # אדמינים לפקודות פנימיות (/status /broadcast /users). ריק = אף אחד.
 # לא לשים בגיט — רק ב-.env
 ADMIN_USER_IDS = frozenset(_env_id_list('ADMIN_USER_IDS'))
 
 # Version info
-VERSION = "0.13.1"
-CHANGELOG = """🆕 גרסה 0.13.1:
-• /status לאדמין — uptime שרת/סרוויס/Docker, קומיט שרץ, מצב תור
-• /mode הוסרה — המידע כבר ב-/status
-• פקודות אדמין שותקות לגמרי למשתמש רגיל"""
+VERSION = "0.14.0"
+CHANGELOG = """🆕 גרסה 0.14.0:
+• לייב שעוד לא עלה — אחרי בחירת אודיו/וידאו נשמרת המתנה (48 שעות, בדיקה כל שעה) ושורדת ריסטארט
+• כשההקלטה עולה ההורדה מתחילה לבד; אם לא — הודעה שקטה
+• /stop מבטל גם המתנה ללייב
+• התקדמות פלייליסט ("הורדתי X מתוך Y") בלי צליל; הסיכום בסוף עם צליל"""

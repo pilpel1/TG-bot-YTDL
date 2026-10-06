@@ -610,7 +610,10 @@ async def test_button_click_audio(mock_update, mock_context):
     # ה-coro_factory שנשלח אליו כדי לוודא שהוא אכן קורא ל-download_with_quality
     # עם הפרמטרים הנכונים.
     with patch('bot_handlers.download_with_quality') as mock_download, \
-         patch('bot_handlers.enqueue_download_job', new=AsyncMock()) as mock_enqueue:
+         patch('bot_handlers.enqueue_download_job', new=AsyncMock()) as mock_enqueue, \
+         patch('live_wait.probe_youtube_live', return_value={
+             'live_status': 'not_live', 'is_live': False, 'title': 'x', 'id': 'dQw4w9WgXcQ',
+         }):
         mock_download.return_value = AsyncMock()
         await button_click(mock_update, mock_context)
         mock_enqueue.assert_called_once()
@@ -793,7 +796,10 @@ async def test_button_click_dynamic_quality_selection_uses_cached_options(mock_u
     }
 
     with patch('bot_handlers.download_with_quality') as mock_download, \
-         patch('bot_handlers.enqueue_download_job', new=AsyncMock()) as mock_enqueue:
+         patch('bot_handlers.enqueue_download_job', new=AsyncMock()) as mock_enqueue, \
+         patch('live_wait.probe_youtube_live', return_value={
+             'live_status': 'not_live', 'is_live': False, 'title': 'x', 'id': 'dQw4w9WgXcQ',
+         }):
         mock_download.return_value = AsyncMock()
         await button_click(mock_update, mock_context)
         coro_factory = mock_enqueue.call_args[0][2]

@@ -297,7 +297,10 @@ async def download_playlist(context, status_message, url, download_mode, quality
                 if playlist_limit and total_available > total_videos
                 else f'מצאתי {total_videos} סרטונים בפלייליסט. מתחיל להוריד... ⏳'
             )
-            progress_message = await status_message.reply_text(progress_intro)
+            progress_message = await status_message.reply_text(
+                progress_intro,
+                disable_notification=True,
+            )
             
             successful_downloads = 0
             error_videos = 0
@@ -325,7 +328,8 @@ async def download_playlist(context, status_message, url, download_mode, quality
                     current_title = entry.get('title', f'סרטון #{index}')
                     progress_message = await status_message.reply_text(
                         f'הורדתי {successful_downloads}/{total_videos} סרטונים מהפלייליסט\n'
-                        f'עכשיו מוריד: {current_title} ⏳'
+                        f'עכשיו מוריד: {current_title} ⏳',
+                        disable_notification=True,
                     )
                     
                     video_url = f"https://www.youtube.com/watch?v={video_id}"
